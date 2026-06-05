@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.pyc
+backend/venv/
+backend/db.sqlite3
+
+# Django
+backend/staticfiles/
+backend/data/
+backend/api/landmarks_*.csv
+backend/api/model_report_*.json
+backend/api/modelo_lsch.backup.pkl
+backend/api/hand_landmarker.task
+frontend/certs/
+
+# React
+frontend/node_modules/
+frontend/dist/
+
+# Env
+.env
+.env.local
+
+# VS Code
+.vscode/
+
+# Docker
+*.log
