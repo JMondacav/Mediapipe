@@ -1,0 +1,20 @@
+Integrantes:
+- Nombre Apellido
+- Nombre Apellido
+
+Repositorio GitHub:
+https://github.com/JMondacav/Mediapipe
+
+Enlace al contenedor Dockerizado:
+https://hub.docker.com/r/usuario/ensenavos
+
+Enlace al video demostrativo:
+https://enlace-al-video
+
+Notas para el video:
+- Mostrar registro o inicio de sesion.
+- Mostrar traductor funcionando y guardando una sesion.
+- Mostrar historial, estadisticas y feedback.
+- Mostrar tutorial de letras.
+- Mostrar la BD remota cambiando despues de usar la app.
+- Mostrar docker compose up --build y la app funcionando desde Docker.
