@@ -40,6 +40,8 @@ HAND_MODEL_URL = (
 )
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+# Entrenar también con cada letra reflejada (zurdos). LSCH_MIRROR=False lo apaga.
+MIRROR_LETTERS = os.environ.get("LSCH_MIRROR", "True") == "True"
 SPLITS = ("train", "valid", "test")
 COLUMNAS = [axis for i in range(21) for axis in (f"x{i}", f"y{i}", f"z{i}")]
 
@@ -148,6 +150,14 @@ def train_and_select_model(df: pd.DataFrame) -> tuple[Pipeline, dict]:
 
     if train_df.empty:
         raise RuntimeError("No hay datos de entrenamiento con mano detectada.")
+
+    # Cada imagen también reflejada (la misma letra hecha con la otra mano),
+    # para que el modelo reconozca igual a personas diestras y zurdas.
+    if MIRROR_LETTERS:
+        mirrored = train_df.copy()
+        x_columns = [column for column in feature_columns if column.startswith("x")]
+        mirrored[x_columns] = -mirrored[x_columns]
+        train_df = pd.concat([train_df, mirrored], ignore_index=True)
 
     X_train = train_df[feature_columns]
     y_train = train_df["label"]
@@ -289,6 +299,13 @@ def main():
 
     joblib.dump(model, MODEL_PATH)
     REPORT_PATH.write_text(json.dumps(report, indent=2, ensure_ascii=False))
+
+    # Formas de cada letra para que el entrenamiento de señas aprenda que
+    # deletrear no es una seña con movimiento (ver letter_shapes.py).
+    from letter_shapes import LETTER_SHAPES_PATH, save_letter_shapes
+
+    shapes = save_letter_shapes(df[COLUMNAS].to_numpy(), df["label"].to_numpy())
+    print(f"Formas de letras guardadas en: {LETTER_SHAPES_PATH} ({shapes})")
 
     print(f"Modelo nuevo guardado en: {MODEL_PATH}")
     print(f"Reporte guardado en: {REPORT_PATH}")

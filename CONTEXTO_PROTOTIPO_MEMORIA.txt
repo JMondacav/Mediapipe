@@ -1,0 +1,655 @@
+CONTEXTO DEL PROTOTIPO ENSEÑAVOS PARA REDACTAR LA MEMORIA
+(Estado real del código a octubre de 2026)
+
+======================================================================
+INSTRUCCIONES PARA TI (CLAUDE)
+======================================================================
+
+Me estás ayudando a redactar el capítulo 2 de mi memoria de título sobre
+EnseñaVos, un prototipo que reconoce Lengua de Señas Chilena (LSCh) con la
+cámara. Abajo está lo que el prototipo usa HOY, sacado directamente del código.
+
+Reglas:
+1. Para describir el prototipo usa SOLO estos datos. La teoría general
+   (qué es un SVM, qué es una convolución, etc.) sí puedes explicarla tú.
+2. No inventes cifras, resultados ni referencias bibliográficas. Si falta
+   un dato, escribe [PENDIENTE: ...] para que yo lo complete.
+3. Distingue siempre lo que YA está implementado de lo planificado o del
+   trabajo futuro.
+4. Redacta en español formal, estilo memoria de título universitaria chilena.
+
+Secciones a completar: 2.4 Clasificación de señas estáticas, 2.5 Clasificación
+de señas dinámicas (si existe en mi índice), 2.6 Reconocimiento en tiempo real,
+2.7 Conjuntos de datos y aumento de datos, 2.8 Inferencia en dispositivos
+móviles y latencia, 2.9 Métricas de evaluación, 2.10 Estado del arte.
+
+======================================================================
+1. ARQUITECTURA GENERAL
+======================================================================
+
+- Aplicación web: frontend React 19 + Vite, backend FastAPI (Python 3.12),
+  base de datos PostgreSQL (SQLite en desarrollo), todo con Docker Compose.
+  Tiene registro e inicio de sesión, traductor en vivo, historial,
+  estadísticas, tutorial de letras y una pantalla para grabar muestras.
+- Flujo: la cámara se procesa EN EL NAVEGADOR del usuario con MediaPipe
+  HandLandmarker (@mediapipe/tasks-vision 0.10.35, WebAssembly, tarjeta
+  gráfica con respaldo en CPU, modo VIDEO, hasta 2 manos, umbrales de
+  detección/presencia/seguimiento de 0,3).
+- MediaPipe entrega 21 puntos clave (landmarks) por mano, cada uno con x, y, z
+  normalizados. Al servidor solo se envían esos números: nunca se envían ni se
+  guardan imágenes ni video.
+- La cara se procesa también en el navegador, con MediaPipe FaceLandmarker
+  (misma versión, 1 cara, en uno de cada dos fotogramas). De sus 478 puntos y
+  52 "blendshapes" (intensidad de 0 a 1 de cada movimiento de la cara: cejas,
+  ojos, boca, mejillas) se envían solo los 52 valores y 5 puntos de referencia
+  (nariz, frente, mentón y los dos costados). La persona puede apagar la
+  lectura de cara.
+- La clasificación ocurre en el SERVIDOR con tres modelos:
+  a) Señas estáticas (letras): SVM con kernel RBF (scikit-learn).
+  b) Señas dinámicas (con movimiento): red convolucional 1D temporal
+     (CNN 1D), entrenada con TensorFlow/Keras y ejecutada con numpy. Puede
+     usar además la ubicación de las manos respecto a la cara.
+  c) Expresiones faciales que acompañan a las señas (pregunta, negación,
+     etc.): una segunda CNN 1D con la misma arquitectura.
+- Un "modo único" decide automáticamente, según el movimiento de la mano, qué
+  modelo usar en cada momento.
+- El resultado son solo las señas reconocidas (glosas), en el orden en que
+  salen. Por decisión de diseño, la app NO interpreta las señas ni las
+  convierte en una frase en español: se probó un armado de frase con un
+  modelo de lenguaje y se descartó, para que lo mostrado sea exactamente lo
+  que se señó.
+
+======================================================================
+2.4 CLASIFICACIÓN DE SEÑAS ESTÁTICAS (LETRAS)
+======================================================================
+
+Entrada: un vector de 63 valores por fotograma (21 puntos × x, y, z) de una
+sola mano. Si hay dos manos en cuadro, se usa la más grande en la imagen
+(la más cercana a la cámara).
+
+Normalización: se resta la posición de la muñeca (punto 0) a todos los puntos
+y se divide por la mayor distancia de un punto a la muñeca. Así el vector no
+depende de dónde está la mano en la imagen ni de su tamaño o distancia a la
+cámara. No es invariante a la rotación.
+
+Entrenamiento (script backend/api/train_from_roboflow.py):
+- Datos: imágenes de un dataset de letras de LSCh de Roboflow, en formato de
+  clasificación (carpetas train/valid/test por clase). Se excluye la clase
+  "EMPTY".
+- A cada imagen se le extraen los landmarks con MediaPipe HandLandmarker en
+  Python (modo IMAGE, 1 mano, umbrales 0,25). Las imágenes sin mano detectada
+  se descartan.
+- Se entrenan y comparan tres clasificadores supervisados:
+    * Extra Trees (700 árboles, class_weight balanceado)
+    * Random Forest (500 árboles, class_weight balanceado)
+    * SVM con kernel RBF (C = 12, gamma = "scale", class_weight balanceado,
+      probability = True), precedido de StandardScaler
+- Se elige el de mejor puntaje en validación:
+    puntaje = exactitud + 0,15 × (fracción de predicciones con confianza ≥ 0,85)
+              + 0,05 × (confianza promedio)
+  Es decir, se premia acertar y además acertar con seguridad.
+- Modelo que quedó elegido: Pipeline(StandardScaler + SVC con kernel RBF),
+  verificado en el archivo modelo_lsch.pkl.
+- La confianza que se muestra al usuario es la probabilidad de la clase
+  predicha (predict_proba de scikit-learn con probability = True).
+
+Clases: letras del abecedario de LSCh presentes en el dataset. El tutorial de
+la app enseña A, L, U y "te quiero" (ILY).
+[PENDIENTE: lista exacta de clases y cantidad de imágenes por clase, desde
+model_report_roboflow_lsch.json.]
+
+Por qué este enfoque: el vector de puntos clave tiene baja dimensión (63) y el
+dataset es pequeño. Un SVM con kernel RBF funciona bien en ese escenario, es
+rápido de entrenar y de ejecutar, y entrega probabilidades que sirven para el
+umbral de confianza. Además, trabajar sobre puntos clave en vez de píxeles
+hace que el modelo no dependa del fondo, la luz, la ropa ni el color de piel,
+siempre que MediaPipe detecte la mano.
+
+Limitación: el modelo estático no tiene una clase "sin seña". Una mano quieta
+en cuadro siempre se clasifica como alguna letra; se mitiga con el umbral y la
+confirmación temporal (ver 2.6).
+
+======================================================================
+2.5 CLASIFICACIÓN DE SEÑAS DINÁMICAS (CNN 1D TEMPORAL)
+======================================================================
+
+Representación de una seña (backend/api/sequence_features.py):
+- Ventana de 1,5 s remuestreada a 30 pasos equiespaciados en el tiempo. Para
+  cada paso se toma el fotograma grabado más cercano, así la secuencia no
+  depende de los FPS de la cámara (10 o 30 fps dan la misma duración).
+- 132 características por paso, 66 por mano (izquierda / derecha, según la
+  lateralidad que entrega MediaPipe):
+    * 63: forma de la mano, normalizada igual que en el modelo estático.
+    * 2: trayectoria de la muñeca (x, y), relativa al centro del movimiento en
+      la ventana y medida en "tamaños de mano" (distancia muñeca–nudillo del
+      dedo medio), para no depender de la distancia a la cámara.
+    * 1: presencia de la mano (1 o 0).
+- La coordenada x se corrige por la relación de aspecto del video, para que un
+  movimiento circular no se vea elíptico en cámaras verticales u horizontales.
+- Ubicación respecto a la cara (opcional, 9 columnas más → 141 por paso): por
+  cada mano, el centro de la palma y la punta del índice respecto a la nariz,
+  medidos en "altos de cara" (distancia frente–mentón), y una columna que
+  indica si se vio la cara. Permite distinguir señas con la misma forma y
+  movimiento hechas en la frente, la boca o el mentón (el "lugar de
+  articulación" es un parámetro fonológico de la lengua de señas). Se activa
+  sola al entrenar si al menos el 80% de las muestras se grabó viendo la
+  cara; el modelo guarda si la usa, así que los modelos antiguos (solo manos)
+  siguen funcionando sin cambios.
+
+Representación de una expresión (misma ventana de 1,5 s y 30 pasos):
+- 52 características por paso:
+    * 43 blendshapes: los 52 de MediaPipe menos "_neutral" y los 8 de hacia
+      dónde miran los ojos (eyeLook*), que cambian con la mirada y no con la
+      expresión.
+    * 3 ángulos de la cabeza (giro, inclinación y ladeo, en radianes),
+      estimados con la profundidad de los costados, la frente y el mentón.
+    * Los mismos 3 ángulos respecto a su promedio en la ventana: capturan
+      asentir y negar con la cabeza.
+    * 2: movimiento de la nariz respecto a su promedio, en altos de cara.
+    * 1: presencia de la cara.
+
+Arquitectura (Keras):
+  Entrada (30 × 132)
+  → 3 bloques iguales: Conv1D (64 filtros, kernel 5, padding "same", ReLU)
+                       → BatchNormalization → MaxPooling1D (2)
+  → GlobalAveragePooling1D → Dropout (0,3) → Dense softmax (una salida por
+    seña, incluida la clase "NADA")
+- 84.420 parámetros entrenables con 4 clases. Tras los tres bloques, el campo
+  receptivo cubre toda la ventana de 30 pasos.
+- El modelo de expresiones usa exactamente la misma arquitectura con entrada
+  30 × 52 (58.885 parámetros con 5 clases). Su clase "sin expresión" es
+  NEUTRAL, equivalente a NADA en las señas.
+- Por qué CNN 1D y no LSTM/GRU: procesa todos los pasos en paralelo en vez de
+  uno tras otro, es liviana, y usa operaciones estándar que se convierten sin
+  problemas a LiteRT (TensorFlow Lite) si más adelante se ejecuta en el
+  dispositivo.
+
+Entrenamiento (backend/api/train_dynamic.py, en un contenedor con
+TensorFlow 2.18 / Keras 3):
+- División estratificada con semilla 42: ~70% entrenamiento, ~15% validación,
+  ~15% prueba.
+- Optimizador Adam (tasa 0,001), entropía cruzada categórica, pesos de clase
+  balanceados, lotes de 32, hasta 150 épocas.
+- EarlyStopping (paciencia 20, restaurando los mejores pesos) y
+  ReduceLROnPlateau (factor 0,5, paciencia 8).
+- Aumento de datos: ver 2.7.
+
+Despliegue: los pesos se exportan a un archivo numpy (.npz de ~300 KB) y el
+servidor ejecuta la red capa por capa con numpy, sin instalar TensorFlow. El
+entrenamiento verifica que ambas implementaciones den el mismo resultado; la
+diferencia máxima medida fue 1,2 × 10⁻⁷. También se guarda el modelo Keras
+(.keras) para una futura conversión a LiteRT.
+
+======================================================================
+2.6 RECONOCIMIENTO EN TIEMPO REAL
+======================================================================
+
+Hay dos modos de traducir:
+- Grabar y después traducir (el que usan las dos versiones de la app): la
+  persona hace todas sus señas de corrido y al terminar se analiza la
+  grabación completa. Ver "Modo grabación" más abajo.
+- En vivo, palabra por palabra con micro-pausas entre señas. Fue el primer
+  enfoque; sigue disponible en el backend (/api/translate/), pero ninguna
+  pantalla lo usa, porque el modo grabación resultó más rápido y preciso.
+El reconocimiento continuo a velocidad natural, con coarticulación real, no
+está evaluado: el modo grabación solo se probó con grabaciones simuladas
+(ver 2.9).
+
+Ventana deslizante:
+- El navegador guarda los fotogramas de los últimos ~1,7 s, cada uno con su
+  marca de tiempo y hasta 2 manos.
+- Cada 300 ms envía esa ventana al servidor, siempre que no haya otra
+  petición en curso.
+
+Medida de movimiento: el mayor recorrido de cualquiera de los 21 puntos de la
+mano dentro de la ventana, dividido por el tamaño de la mano.
+
+Modo único (backend/api/live_translator.py). En cada ventana:
+1. Si ningún fotograma tiene manos → "sin seña".
+2. Si el movimiento en 1,5 s supera el umbral del filtro y la ventana está
+   al menos 90% completa → se consulta la CNN 1D. Se acepta una seña si no es
+   "NADA" y su confianza es ≥ 0,90.
+3. Si no, y la mano estuvo quieta el último medio segundo (movimiento < 0,2)
+   → se consulta el SVM de letras.
+4. La seña con movimiento tiene prioridad sobre la letra.
+
+Umbral del filtro de movimiento: se calcula al entrenar y se guarda en el
+modelo. Es el 80% del percentil 5 del movimiento de la seña más quieta,
+acotado entre 0,05 y 0,5.
+- Al principio era un valor fijo de 0,5, elegido cuando todas las señas se
+  movían bastante (la menor partía en 0,69).
+- Al agregar DEJAME_PENSAR, una seña casi quieta (mediana 0,22), el filtro
+  fijo la bloqueaba el 85% de las veces: en vivo se reconocía solo en 3 de
+  20 muestras.
+- Con el umbral calculado (0,085 con las señas actuales) se reconoce en 19
+  de 20, y las manos quietas las sigue resolviendo la clase NADA.
+
+Umbral para leer una letra: la mano debe moverse menos de 0,2 en el último
+medio segundo. En las muestras, una mano quieta llega a 0,08 en 0,5 s.
+
+Modo grabación (backend/api/recording_decoder.py, usado por las dos versiones):
+1. La persona toca ⏺, hace todas sus señas de corrido y termina con ■, o
+   bajando las manos 2 s (máximo 30 s). Mientras graba no se traduce nada.
+2. La ventana de 1,5 s recorre la grabación completa cada 100 ms. En cada
+   posición, en tres pistas separadas: seña (CNN 1D, confianza ≥ 0,90),
+   letra (SVM: mano quieta los últimos 0,3 s y la misma letra en los
+   últimos 3 fotogramas, confianza media ≥ 0,75; la B ≥ 0,90) y forma de
+   la mano mientras se mueve (la letra más parecida entre las formas reales
+   de formas_letras.npz). Con 0,90 para todas las letras, solo se aceptaba
+   el 50% de las formas bien hechas (la S nunca); con 0,75, el 92%, con
+   0,2% de errores. La B es la excepción porque una mano abierta en reposo
+   se lee como B en el 95% de los cuadros; con 0,90, solo un 4% de esos
+   cuadros pasa como letra. Para saber si la mano está quieta, el tamaño
+   de la mano no baja de la mitad de su largo total: con la mano de perfil
+   (la X) la palma se ve muy corta y el temblor normal parecía movimiento,
+   y la X no se leía nunca. Al comienzo
+   de la grabación todavía no hay 1,5 s de historia, así que ahí basta con
+   0,5 s. Antes se exigía siempre el 90% de la ventana, y con señas rápidas
+   la primera seña se perdía, porque terminaba antes de que hubiera una
+   ventana completa.
+3. Se corrige un "parpadeo" de una sola posición entre dos iguales.
+4. Una palabra es un tramo de al menos 2 posiciones seguidas con la misma
+   seña. La misma seña repetida con menos de 1 s de diferencia se une.
+5. Una letra exige 2 posiciones seguidas (sostenerla ~0,5 s). Letras
+   seguidas forman una palabra deletreada; una pausa de más de 1,2 s
+   empieza otra. Letras y señas se combinan sin esperar, con dos reglas:
+   - Postura de la seña: cada seña tiene una forma de mano según el modelo
+     de letras (con las muestras grabadas: HOLA se mueve con forma de B,
+     AURA de M). Una letra con esa forma, pegada a la
+     seña (hasta 2 s antes o 0,3 s después), es la postura con que empieza
+     o termina la seña y no se escribe.
+   - Deletreo leído como seña: si mientras se detectaba una "seña" empezaron
+     2 o más letras sostenidas, era deletreo (una seña real no tiene letras
+     quietas en medio de su movimiento) y la seña no se escribe.
+   Antes la seña tenía prioridad en cada posición, una letra necesitaba 4
+   posiciones con la mano quieta 0,5 s, y se ignoraban las letras durante
+   1 s después de una seña: cada letra necesitaba ~1 s y combinar letras con
+   señas obligaba a esperar.
+6. Se muestran las señas tal cual, una ficha por seña y en el orden en que
+   salieron. La voz del navegador puede leerlas en voz alta para la persona
+   oyente.
+7. Expresiones (si se leyó la cara y hay modelo de expresiones): la misma
+   ventana recorre la grabación con el modelo de expresiones, en las
+   posiciones donde la cara se vio en al menos el 60% de los pasos. Una
+   expresión distinta de NEUTRAL cuenta con confianza ≥ 0,80.
+   - Acompaña a una palabra si aparece en al menos 2 de sus posiciones y en
+     la mitad de ellas. Las palabras seguidas con la misma expresión se
+     muestran juntas en un recuadro con la expresión arriba, como la marca
+     que se escribe sobre la glosa en la notación de lengua de señas.
+   - Si se sostiene al menos 5 posiciones fuera de las palabras, con
+     confianza media ≥ 0,90, aparece sola (por ejemplo, negar con la cabeza
+     sin hacer una seña). No cuenta como sola si es la misma expresión de una
+     palabra que recién terminó: la ventana de 1,5 s la sigue viendo hasta
+     ~1 s después.
+   - Al leer en voz alta no se agregan palabras: la pregunta y la intensidad
+     solo cambian la entonación ("¿tu nombre?"), y negar o asentir se leen
+     como "no" y "sí", que es su significado.
+Ventaja frente al modo en vivo: al mirar la grabación completa se sabe qué
+pasó antes y después de cada momento, así que no hace falta confirmar cada
+seña ni hacer pausas entre ellas.
+
+Suavizado y confirmación (en el navegador):
+- Seña dinámica: se escribe cuando la misma seña sale 2 veces seguidas. Luego
+  se vacía el buffer, para no volver a leer el mismo movimiento, y se bloquean
+  las letras durante 1 s.
+- Letra: confianza ≥ 0,85 y la misma letra en al menos 3 de las últimas 4
+  predicciones. Además hay una espera mínima para repetir la misma letra
+  (~2,3–2,6 s) y las frases no se repiten hasta que cambie la seña.
+
+Segmentación (inicio y fin de una seña): no hay un detector explícito. Se
+logra de forma implícita con la medida de movimiento, la confirmación
+temporal y el vaciado del buffer tras cada seña aceptada.
+
+Clase "sin seña":
+- En señas dinámicas existe la clase "NADA", entrenada con movimientos que no
+  son señas.
+- Además hay un filtro de movimiento: si la mano está quieta, ni se consulta
+  la CNN 1D.
+
+Salida sin interpretación: el traductor muestra solo las glosas reconocidas,
+en orden (por ejemplo "YO CASA IR"), sin convertirlas a la gramática del
+español. Se probó armar la frase con un modelo de lenguaje y se descartó: la
+idea es que lo mostrado sea exactamente lo que se señó, sin que el sistema
+"adivine" lo que la persona quiso decir.
+
+Observación de pruebas: con un modelo entrenado sin ejemplos de "movimiento
+que no es seña", cualquier movimiento se clasificaba como la seña más
+genérica (HOLA). Esto confirmó que la clase "NADA" debe incluir movimientos y
+no solo manos quietas.
+
+======================================================================
+2.7 CONJUNTOS DE DATOS Y AUMENTO DE DATOS
+======================================================================
+
+Datos estáticos: dataset de letras de LSCh de Roboflow (imágenes).
+[PENDIENTE: nombre exacto, enlace y cantidad de imágenes por clase.]
+
+Datos dinámicos: dataset PROPIO, grabado con la pantalla "Grabar señas" de la
+propia app, es decir, con el mismo pipeline de MediaPipe que se usa al
+traducir.
+- Cada muestra dura 1,5 s + 150 ms, con cuenta regresiva y barra de progreso.
+- Se descarta automáticamente si tiene menos de 8 fotogramas o, salvo en
+  "NADA", si la mano aparece en menos del 60% de los fotogramas.
+- Se guardan los puntos clave crudos con su marca de tiempo (JSON, ~40 KB por
+  muestra), no las características, para poder cambiar el preprocesamiento
+  sin volver a grabar.
+- Estado actual: 6 clases (incluida NADA) y 147 muestras, todas grabadas por
+  una sola persona. Las 25 muestras de NADA son de manos quietas.
+  [PENDIENTE: actualizar con el vocabulario final y con NADA en movimiento.]
+- Meta: al menos 30 muestras por seña, grabadas por varias personas, y ~50 de
+  NADA con movimientos variados (deletreo, saludo con el dorso, gestos al
+  azar).
+- No se usó ningún conjunto público de LSCh en video. La brecha de datos en
+  LSCh es una de las razones para grabar un dataset propio.
+- Desde que la app lee la cara, las muestras de señas guardan también la
+  cara de cada fotograma (para la ubicación respecto a la cara).
+
+Datos de expresiones: también PROPIOS, grabados en la pestaña "Expresiones"
+de la misma pantalla. Se mantiene la expresión mientras dura la barra,
+idealmente haciendo señas al mismo tiempo. Se descarta la muestra si la cara
+aparece en menos del 60% de los fotogramas. NEUTRAL es obligatoria (cara
+normal haciendo distintas señas, hablando o mirando a los lados). Etiquetas
+sugeridas: PREGUNTA (cejas arriba, pregunta de sí/no), PREGUNTA_QU (cejas
+juntas: qué, quién, dónde), NEGACION (cabeza de lado a lado), AFIRMACION
+(asentir) e INTENSIDAD (mejillas infladas o labios apretados).
+[PENDIENTE: todavía no hay expresiones grabadas por el equipo.]
+
+Aumento de datos (solo en entrenamiento, 16 copias aumentadas por muestra):
+- Deformación temporal: velocidad ×0,8–1,2 y desplazamiento de ±3 pasos.
+- Rotación de ±0,2 rad (~±11°) en el plano de la cámara, de la forma y de la
+  trayectoria.
+- Ruido gaussiano (σ = 0,01) en la forma, solo donde la mano está presente.
+- Escala de la trayectoria ×0,8–1,2.
+- Señado rápido y de corrido (6 copias por muestra de seña): la seña se
+  acelera entre 1 y 2,2 veces y se le antepone otra seña acelerada (cualquier
+  otra clase, incluida NADA). A veces se agregan después hasta 250 ms del
+  comienzo de otra seña. La ventana termina donde termina la seña objetivo.
+  Motivo: en las muestras grabadas, cada seña ocupa toda la grabación
+  (~1,6 s), y sin esta aumentación el modelo no reconocía señas hechas más
+  rápido, cuando la ventana de 1,5 s contiene dos señas mezcladas.
+- Transiciones (4 copias por muestra de seña), con la etiqueta NADA: ventanas
+  donde solo se ve el final de una seña que va saliendo (5–30% de su
+  duración) o el comienzo de una que recién entra (5–25%), con las manos
+  abajo o quietas en el resto. Motivo: el modelo inventaba una seña (casi
+  siempre HOLA) en el paso de una seña a otra o al bajar las manos. Con más
+  porcentaje visible el modelo empezaba a perder señas muy rápidas, que
+  también ocupan poco de la ventana; los porcentajes se eligieron
+  comparando variantes (ver 2.9).
+- Con la cara: en el 15% de los ejemplos se borra la ubicación respecto a la
+  cara (simula que no se vio o que la lectura está apagada) y en el resto se
+  escala ×0,9–1,1 (caras más grandes o más chicas respecto a las manos).
+- Deletreo (2 ventanas por muestra de seña), con la etiqueta NADA: de 1 a 6
+  letras sostenidas 150–600 ms con transiciones de 100–300 ms (los dedos
+  pasan de una forma a otra y la muñeca se corre un poco), con el temblor de
+  una mano quieta medido en muestras reales. En la mitad de las ventanas la
+  mano sube desde abajo formando la primera letra y baja al final, como al
+  hacer una letra sola. Las formas son reales: salen
+  del modelo de letras (formas_letras.npz, 997 formas de 24 letras quietas,
+  tomadas de sus ejemplos de entrenamiento) y se ubican en la posición, el
+  tamaño y la lateralidad de manos reales de las muestras. Motivo: el
+  modelo de señas leía el deletreo como HOLA, y como la seña tenía
+  prioridad, las letras se perdían.
+- Espejo (zurdos), ACTIVADO por defecto: refleja en x e intercambia las
+  manos en el 50% de los ejemplos aumentados y de las transiciones. Antes
+  estaba desactivado porque se temía que confundiera la palma con el dorso
+  (una mano derecha vista por el dorso se parece a una izquierda vista por
+  la palma). Con las transiciones y el deletreo como NADA, se midió que no
+  pasa: HOLA hecho con el dorso (simulado girando cada mano 180° sobre su
+  eje vertical) se reconoció como HOLA en 0 de 12 muestras no vistas con el
+  modelo con espejo, y en 12 de 12 con el modelo anterior (ver 2.9).
+
+Aumento de datos del modelo de expresiones (10 copias por muestra):
+- Deformación temporal (igual que las señas).
+- Espejo en el 50% (intercambia izquierda y derecha de la cara): una
+  expresión significa lo mismo con cualquier lado de la cara.
+- Intensidad ×0,8–1,2, un desplazamiento fijo por persona (σ 0,03) y ruido
+  (σ 0,02) en los blendshapes.
+- Postura base de la cabeza desplazada (cámara más arriba, abajo o de lado)
+  y movimientos de cabeza ×0,7–1,3.
+- En el 20% de los ejemplos la cara desaparece 2 a 4 pasos (una mano la tapa).
+- Expresiones aceleradas hasta 1,8 veces y encadenadas con otra muestra.
+
+Letras y personas zurdas: el modelo de letras (Roboflow) ya contiene ejemplos
+de ambas manos: en sus vectores de soporte el pulgar queda a un lado del
+meñique en ~50% de los casos por letra. Reflejados, el 90% de esos ejemplos
+se reconoce como la misma letra (100% sin reflejar). Al reentrenarlo desde
+Roboflow, train_from_roboflow.py agrega además cada imagen reflejada.
+
+======================================================================
+2.8 INFERENCIA EN DISPOSITIVOS MÓVILES Y LATENCIA
+======================================================================
+
+Estado actual:
+- La app es web: se abre desde el navegador del celular o del computador, sin
+  instalar nada.
+- En el dispositivo corre solo MediaPipe (WebAssembly, modelos hand_landmarker
+  y face_landmarker en float16). Usa la tarjeta gráfica (delegado GPU) para
+  detectar más rápido y, si el dispositivo no lo permite, la CPU. La cara se
+  detecta en uno de cada dos fotogramas (cambia más lento que las manos) y
+  se reutiliza la última lectura si tiene menos de 250 ms. Si el modelo de
+  la cara no carga, las manos siguen funcionando.
+- Con la cara, cada segundo de grabación pesa ~26 KB en JSON (el doble que
+  solo manos); comprimido con gzip, ~6 KB. Se envía por trozos mientras se
+  graba (ver abajo).
+- El dibujo de la mano sobre el video solo se actualiza cuando llega un
+  cuadro nuevo de la cámara. Antes se borraba en cada refresco de pantalla y
+  parpadeaba.
+- Los clasificadores corren en el servidor.
+- NO hay todavía ejecución en el dispositivo con LiteRT ni cuantización:
+  queda como trabajo futuro. El modelo Keras ya está guardado para
+  convertirlo.
+- Tamaño de los modelos: CNN 1D ~300 KB (numpy) / ~1 MB (Keras); SVM ~1 MB.
+- En el celular, la cámara requiere HTTPS si la app se abre desde otra
+  dirección que no sea localhost.
+
+Componentes de la latencia (por diseño; NO medidos todavía):
+1. Detección de MediaPipe por fotograma, en el dispositivo.
+2. Espera de la ventana: 1,5 s de movimiento para señas dinámicas y 0,5 s
+   quieto para letras.
+3. Intervalo entre consultas: 300 ms.
+4. Viaje de ida y vuelta por la red al servidor.
+5. Inferencia en el servidor (CNN 1D en numpy y SVM; ambas livianas).
+6. Confirmación: +300 ms en señas (2 predicciones seguidas) y ~0,9 s en
+   letras (3 de 4).
+Modo grabación: análisis por trozos mientras se graba.
+- Cada ~1 s el navegador envía al servidor lo nuevo (más 1,8 s anteriores
+  para completar las ventanas), comprimido con gzip. El servidor analiza
+  solo las posiciones nuevas (endpoint /api/translate/recording/partial/) y
+  devuelve lo encontrado. Al terminar se envía el último trozo con lo ya
+  encontrado y el servidor arma las palabras. El servidor no guarda estado
+  entre peticiones.
+- El resultado es idéntico al de analizar la grabación completa: verificado
+  en 120 grabaciones simuladas (60 con cara y 60 sin cara).
+- El análisis convierte cada grabación a arrays una sola vez; antes cada
+  fotograma se volvía a procesar en las ~15 ventanas en que aparece. Con la
+  misma salida bit a bit, el análisis completo pasó a ser ~4 veces más rápido.
+
+Tiempo de respuesta medido por HTTP (servidor uvicorn en un computador de
+desarrollo, con cara y modelo de expresiones), desde que se toca Detener:
+  Grabación   Antes: todo al final                 Ahora: por trozos
+  5 s         136 ms de análisis + 103 KB          ~14 ms + 13 KB
+  10 s        281 ms + 222 KB                       ~5 ms + 11 KB
+  30 s        842 ms + 733 KB                       ~12 ms + 17 KB
+Subir 733 KB por 4G (~5 Mbit/s de subida) toma ~1,2 s; 17 KB, ~30 ms. A
+esto se suma la latencia de la red. Cada trozo durante la grabación toma
+~12 ms en el servidor.
+
+En el navegador (Edge, cámara simulada, computador de desarrollo): detección
+de manos ~7 ms y de cara ~5,5 ms por cuadro, con la cara leída en 1 de cada
+2 cuadros. Si el costo promedio por cuadro supera 22 ms, la cara se lee en 1
+de cada 3 o 4 cuadros (las manos siempre en todos); bajo 12 ms vuelve a 1 de
+cada 2. Con la grabación terminada, la app tuvo la respuesta en 11 ms con un
+servidor simulado instantáneo.
+[PENDIENTE: medir en celulares reales; la pantalla Grabar señas muestra los
+cuadros por segundo y los milisegundos por cuadro del dispositivo.]
+
+======================================================================
+2.9 MÉTRICAS DE EVALUACIÓN
+======================================================================
+
+Ya implementadas:
+- Modelo estático (train_from_roboflow.py): exactitud, precisión, sensibilidad
+  (recall) y F1 por clase (classification_report de scikit-learn), matriz de
+  confusión, y fracción de predicciones con confianza ≥ 0,85, en validación y
+  prueba.
+  [PENDIENTE: valores, desde model_report_roboflow_lsch.json.]
+- Modelo dinámico (model_report_dinamico.json): exactitud, sensibilidad por
+  clase y matriz de confusión en validación y prueba, calculadas con la misma
+  inferencia numpy que usa el servidor. También la diferencia Keras/numpy.
+
+Resultados actuales del modelo dinámico (6 clases, 147 muestras):
+- Exactitud en validación: 100%.
+- Exactitud en prueba: 95,5% (21 de 22).
+- Diferencia máxima Keras vs numpy: 1,2 × 10⁻⁷.
+
+Pruebas del backend con las muestras grabadas (Python 3.12 y las mismas
+versiones de librerías del servidor):
+- Cada muestra por separado: 146 de 147 correctas.
+- Grabaciones fluidas simuladas: se pegaron 2 o 3 muestras de señas distintas
+  sin pausa, a veces con una de NADA entre medio, en 40 combinaciones al azar.
+    * Con el umbral de movimiento fijo (0,5): 36 de 40 frases exactas. Las 4
+      fallas eran DEJAME_PENSAR, bloqueada por el filtro.
+    * Con el umbral calculado (0,085): 40 de 40.
+- Grabación solo de manos quietas: no devuelve palabras.
+Cuidado: estas muestras son las mismas del entrenamiento, y pegarlas no
+reproduce la coarticulación real (el paso natural de una seña a otra). Son
+una prueba del método, no de la precisión con personas nuevas.
+
+Velocidad de señado. Se entrenaron dos modelos con TensorFlow 2.18 (la misma
+versión del contenedor de entrenamiento). Luego se probaron frases de 3
+señas sin pausa, armadas solo con muestras de validación y prueba (no usadas
+al entrenar), aceleradas, y con 0,5 s sin manos al final, como envía la app:
+
+  Tiempo por seña            ~1,65 s   ~1,1 s   ~0,8 s   ~0,66 s
+  A) sin aumentación         56/60     46/60    2/60     0/60
+     + corrección de inicio  56/60     56/60    52/60    23/60
+  B) con aumentación de
+     señado rápido + corr.   60/60     60/60    60/60    57/60
+
+Además, el entrenamiento mide la exactitud por ventana con señas aceleradas
+encadenadas sobre muestras no vistas (campo fluency_accuracy del reporte).
+A 2×: 58% sin la aumentación y 100% con ella.
+
+Transiciones como NADA (ver 2.7). Se entrenaron varias variantes con las
+muestras reales y se probaron solo con muestras no vistas (valid + prueba):
+
+                              sin transiciones   con transiciones (elegida)
+  Frases fluidas exactas      49/60              60/60
+  Palabras inventadas         13                 0
+  Pausa con manos abajo       32/40              40/40
+  3 señas a 1× / 1,5× / 2×    40 / 40 / 39 (de 40)   40 / 40 / 38 (de 40)
+  3 señas a 2,5× (~0,66 s)    15/40              15/40
+  Solo NADA                   0 palabras         0 palabras
+Con más porcentaje visible de la seña en las transiciones, el caso 2,5×
+bajaba a 7–11 de 40.
+
+Letras, combinación con señas y personas zurdas. Deletreo simulado con
+formas reales de 13 letras (tomadas de los ejemplos del modelo de letras),
+cada letra sostenida un tiempo, con transiciones de 200 ms y el temblor de
+una mano quieta medido en muestras NADA reales (mediana 0,033 tamaños de
+mano en 0,3 s). Señas: solo muestras no vistas. Palabras de 4 letras, 30
+por caso:
+
+                                      Antes    Traductor nuevo,   Traductor y
+                                               modelo anterior    modelo nuevos
+  Letras de 0,7 s                     0/30     23/30              -
+  Letras de 0,5 s                     0/30     26/30              28/30
+  Seña y luego palabra (0,5 s)        0/30     18/30              25/30
+  Palabra y luego seña (0,5 s)        0/30     16/30              25/30
+  Frases fluidas de señas (diestro)   -        37/40              40/40
+  3 señas seguidas a 2,5×             -        30/30              27/30
+  3 señas seguidas, zurdo, 1× y 2×    -        0/30               30/30
+  HOLA hecho con el dorso             -        HOLA 12/12         HOLA 0/12
+  Letra sola (24 letras × 8)          -        12/192             179/192
+  Palabra que empieza con K (0,6 s)   -        17/20              1/20
+Antes cada letra necesitaba ~1 s (con 1 s se leían 30/30).
+"Letra sola": la mano sube desde abajo formando la letra, la sostiene
+0,6 s y baja. Con el modelo anterior se inventaba una seña en 180 de 192
+casos (casi siempre HOLA). Con el reentrenado fallan la K (DEJAME_PENSAR,
+8 de 8), la X (HOLA, 3 de 8) y la O (DEJAME_PENSAR, 2 de 8). La K tiene
+la misma forma de mano que DEJAME_PENSAR, que casi no se mueve, y solo la
+ubicación (el mentón) las distingue; como solo el 1% de las muestras tiene
+cara, el modelo no usa la ubicación. Por eso una palabra que empieza con K
+sale casi siempre como DEJAME_PENSAR y el resto de la palabra. Enseñar la
+letra sola como NADA cuesta 3 de 30 frases a 2,5× (~0,66 s por seña).
+Se probó también descartar una "seña" hecha con una forma de mano que no
+aparece en sus muestras: evitaba 5 de esos 192 errores, pero con señas
+rápidas medía la forma de la seña vecina y borraba señas casi quietas
+(a 2× y 2,5×: 25/30 y 22/30). Se descartó. Variantes
+probadas del modelo: solo deletreo (sin espejo) daba 40/40 en frases de
+diestros pero 0/30 en zurdos; el espejo con las cantidades anteriores (2
+transiciones, 10 copias) agregaba un HOLA en 3 de 40 frases de diestros, y
+subir a 4 transiciones y 16 copias lo eliminó.
+Pendiente conocido: una mano abierta y quieta se parece a la B. En las
+frases de zurdos simuladas aparecen letras "B" cuando la mano descansa
+abierta entre señas (31 de 40 frases exactas, 9 palabras sobrantes); se
+recomienda bajar o cerrar la mano al descansar.
+
+Expresiones faciales. Lo que SÍ se verificó con datos reales: el
+FaceLandmarker en el navegador (Edge, cámara simulada con la foto de una
+persona) lee la cara en el 100% de los fotogramas y envía los 52 + 15
+valores; los valores coinciden con la foto (sonrisa ≈ 0,94).
+El análisis se probó con caras SINTÉTICAS (cejas, ojos, boca y movimientos
+de cabeza simulados con geometría 3D) sobre las señas reales, entrenando en
+una copia del proyecto y evaluando con 6 personas sintéticas no vistas:
+- Frases con cara neutral: 40/40 exactas y 0 expresiones inventadas.
+- Las mismas frases sin cara (lectura apagada): 40/40.
+- Una seña con expresión dentro de una frase de 3: 59/60 en la seña correcta
+  y 0 en otras señas.
+- Toda la frase con cejas juntas: las 3 palabras marcadas.
+- Seña, negar o asentir con la cabeza sin manos, seña: 28/30 exactas (las 2
+  fallas son asentimientos sintéticos muy leves que el modelo no detectó).
+- Diferencia máxima Keras vs numpy: 1,2 × 10⁻⁷ en el modelo de expresiones
+  y en el de señas con ubicación respecto a la cara (141 columnas, 87.430
+  parámetros).
+Estos resultados prueban que el método funciona de punta a punta, pero NO
+miden la precisión con expresiones reales: hay que grabarlas y evaluarlas.
+
+Estos valores son OPTIMISTAS: todas las muestras son de una sola persona, el
+conjunto de prueba es pequeño, y solo contiene señas que el modelo conoce. En
+uso real se observaron falsos positivos (HOLA ante movimientos que no eran
+seña). La evaluación debe repetirse con varias personas y con movimientos
+que no sean seña.
+
+Aún no implementadas:
+- Precisión y F1 del modelo dinámico (se pueden calcular desde su matriz de
+  confusión).
+- Tiempo de respuesta y FPS.
+- Evaluación con personas que no grabaron datos de entrenamiento.
+
+======================================================================
+2.10 ESTADO DEL ARTE: LO QUE APORTA ESTE PROTOTIPO
+======================================================================
+
+Construye la tabla comparativa solo con trabajos reales que puedas citar con
+seguridad; si no estás seguro de una referencia, márcala como [VERIFICAR].
+Los rasgos del prototipo que definen el vacío que aborda son:
+- Lengua de Señas Chilena, que tiene pocos datos disponibles comparada con
+  ASL u otras.
+- Aplicación web sin instalación, usable desde el celular.
+- Reconocimiento basado en puntos clave (MediaPipe), no en píxeles: modelos
+  livianos, sin enviar ni guardar imágenes (privacidad).
+- Enfoque híbrido: SVM para letras estáticas + CNN 1D temporal para señas con
+  movimiento, en pistas paralelas que se combinan sin esperas (deletreo
+  junto a señas), con reglas para no confundir la postura de una seña con
+  una letra ni el deletreo con una seña.
+- Uso por personas zurdas sin grabar muestras propias (entrenamiento con
+  espejo, validado con muestras reflejadas).
+- Dataset dinámico propio, grabado con la misma app.
+- Salida fiel: solo las señas reconocidas, en orden, sin interpretación ni
+  reformulación automática.
+- Modo "grabar y después traducir", que permite señar de corrido sin pausas.
+- Componentes no manuales: expresiones faciales (cejas, boca, movimientos de
+  cabeza) reconocidas con una segunda CNN 1D y mostradas sobre las señas que
+  acompañan, más la ubicación de las manos respecto a la cara.
+- Limitaciones declaradas:
+    * Vocabulario pequeño y cerrado.
+    * Señas encadenadas solo probadas con grabaciones simuladas; la
+      coarticulación real no está evaluada.
+    * Las expresiones faciales solo se evaluaron con caras sintéticas.
+    * La ubicación se mide respecto a la cara, no al resto del cuerpo
+      (hombros, pecho): no se usa detección de pose.
+    * Una seña casi quieta con la misma forma de mano que una letra
+      (DEJAME_PENSAR y la K) se confunde con ella mientras el modelo no use
+      la ubicación respecto a la cara.
+    * Datos de pocas personas.

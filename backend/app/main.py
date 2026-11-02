@@ -1,3 +1,5 @@
+from typing import Literal
+
 from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
@@ -5,6 +7,7 @@ from sqlalchemy.orm import Session
 from . import models, schemas
 from .auth import create_token, get_current_user, hash_password, verify_password
 from .database import Base, engine, get_db
+from .gzip_request import GzipRequestMiddleware
 
 Base.metadata.create_all(bind=engine)
 
@@ -14,6 +17,7 @@ app = FastAPI(
     description="API FastAPI para traduccion de lengua de senas con MediaPipe.",
 )
 
+app.add_middleware(GzipRequestMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -264,4 +268,204 @@ def predict(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error en prediccion: {exc}",
+        ) from exc
+
+
+@app.get("/api/dynamic/status/")
+def dynamic_status(current_user: models.User = Depends(get_current_user)):
+    from api.dynamic_predictor import EXPRESSIONS, model_status
+    from api.dynamic_samples import (
+        EXPRESSION,
+        FACE_LOCATION_MIN_SHARE,
+        count_samples,
+        count_samples_with_face,
+    )
+
+    model_info = model_status()
+    samples = count_samples()
+    with_face = count_samples_with_face()
+    total = sum(samples.values())
+    return {
+        "model": model_info,
+        "window_ms": model_info["window_ms"],
+        "samples": samples,
+        # Para activar la ubicación de la mano respecto a la cara al reentrenar.
+        "samples_with_face": with_face,
+        "face_location_share": round(sum(with_face.values()) / total, 3) if total else 0.0,
+        "face_location_min_share": FACE_LOCATION_MIN_SHARE,
+        "expressions": {
+            "model": model_status(EXPRESSIONS),
+            "samples": count_samples(EXPRESSION),
+        },
+    }
+
+
+# Para guardar una expresión, la cara debe verse en buena parte de la muestra.
+MIN_FACE_RATIO_EXPRESSION = 0.6
+
+
+@app.post("/api/dynamic/samples/", status_code=201)
+def create_dynamic_sample(
+    payload: schemas.DynamicSampleIn,
+    current_user: models.User = Depends(get_current_user),
+):
+    from api.dynamic_samples import EXPRESSION, save_sample
+    from api.sequence_features import (
+        WINDOW_MS,
+        build_expression_features,
+        build_sequence_features,
+        face_ratio,
+    )
+
+    frames = [frame.model_dump(exclude_none=True) for frame in payload.frames]
+
+    try:
+        # Se valida que la grabacion se pueda convertir antes de guardarla.
+        if payload.kind == EXPRESSION:
+            if face_ratio(frames) < MIN_FACE_RATIO_EXPRESSION:
+                raise ValueError("No se vio bien la cara. Mira a la cámara y vuelve a grabar.")
+
+            build_expression_features(frames, payload.aspect_ratio)
+        else:
+            build_sequence_features(frames, payload.aspect_ratio, face_location=True)
+
+        return save_sample(
+            payload.label,
+            frames,
+            payload.aspect_ratio,
+            WINDOW_MS,
+            current_user.id,
+            payload.kind,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.delete("/api/dynamic/samples/{label}/{filename}/")
+def delete_dynamic_sample(
+    label: str,
+    filename: str,
+    kind: Literal["sign", "expression"] = "sign",
+    current_user: models.User = Depends(get_current_user),
+):
+    from api.dynamic_samples import delete_sample
+
+    try:
+        delete_sample(label, filename, current_user.id, kind)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    return {"message": "Muestra borrada"}
+
+
+@app.post("/api/dynamic/predict/")
+def predict_dynamic(
+    payload: schemas.PredictSequenceIn,
+    current_user: models.User = Depends(get_current_user),
+):
+    try:
+        from api.dynamic_predictor import predict_sequence
+
+        frames = [frame.model_dump() for frame in payload.frames]
+        return predict_sequence(frames, payload.aspect_ratio)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error en prediccion dinamica: {exc}",
+        ) from exc
+
+
+@app.post("/api/translate/")
+def translate_live(
+    payload: schemas.PredictSequenceIn,
+    current_user: models.User = Depends(get_current_user),
+):
+    """Modo unico: decide si la ventana es una seña con movimiento o una letra."""
+    try:
+        from api.live_translator import translate_window
+
+        frames = [frame.model_dump() for frame in payload.frames]
+        return translate_window(frames, payload.aspect_ratio)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error en traduccion: {exc}",
+        ) from exc
+
+
+@app.post("/api/translate/recording/partial/")
+def translate_recording_partial(
+    payload: schemas.PartialRecordingIn,
+    current_user: models.User = Depends(get_current_user),
+):
+    """Analiza un trozo de una grabacion en curso, para responder rapido al terminar."""
+    try:
+        from api.recording_decoder import analyze_partial
+
+        frames = [frame.model_dump(exclude_none=True) for frame in payload.frames]
+        return analyze_partial(frames, payload.aspect_ratio, payload.start_t, payload.after_t)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error analizando la grabacion: {exc}",
+        ) from exc
+
+
+@app.post("/api/translate/recording/")
+def translate_recording(
+    payload: schemas.RecordingIn,
+    current_user: models.User = Depends(get_current_user),
+):
+    """
+    Grabar primero, traducir despues: devuelve las señas en el orden en que
+    salen. Si la grabacion ya se analizo por trozos mientras se grababa
+    (start_t), solo se analiza el ultimo trozo.
+    """
+    try:
+        from api.recording_decoder import decode_recording, decode_streamed
+
+        frames = [frame.model_dump(exclude_none=True) for frame in payload.frames]
+
+        if payload.start_t is None:
+            return decode_recording(frames, payload.aspect_ratio)
+
+        return decode_streamed(
+            frames,
+            payload.aspect_ratio,
+            payload.start_t,
+            payload.after_t,
+            payload.end_t,
+            [step.model_dump() for step in payload.steps],
+            [step.model_dump() for step in payload.expression_steps],
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error traduciendo la grabacion: {exc}",
         ) from exc

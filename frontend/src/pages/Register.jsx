@@ -1,74 +1,93 @@
 import { useState } from "react";
-import { useNavigate, Link } from "react-router-dom";
-import { registerUser } from "../services/api";
-import "../App.css";
+import { useNavigate } from "react-router-dom";
+import TopBar from "../components/TopBar";
+import { Button, Field, Notice, Screen } from "../components/ui";
+import { useAuth } from "../context/auth";
 
 function Register() {
   const navigate = useNavigate();
-
+  const { signUp } = useAuth();
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
 
-  const handleSubmit = async (event) => {
+  const submit = async (event) => {
     event.preventDefault();
 
+    if (username.trim().length < 3) {
+      setError("El usuario debe tener al menos 3 caracteres.");
+      return;
+    }
+
+    if (email && !email.includes("@")) {
+      setError("Revisa que el correo esté bien escrito.");
+      return;
+    }
+
+    if (password.length < 6) {
+      setError("La contraseña debe tener al menos 6 caracteres.");
+      return;
+    }
+
+    setBusy(true);
+    setError("");
+
     try {
-      await registerUser(username, email, password);
-      setMessage("Cuenta creada correctamente");
-      navigate("/menu");
-    } catch (error) {
-        console.error(error);
-        setMessage(error.message);
-        }
+      await signUp(username, email, password);
+      navigate("/home", { replace: true });
+    } catch (err) {
+      console.error(err);
+      setError(err.message || "No pudimos crear la cuenta. Inténtalo de nuevo.");
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
-    <main className="app-container">
-      <section className="phone-frame auth-frame">
-        <header className="app-header">
-          <h1>EnseñaVos</h1>
-          <p>Crear cuenta</p>
-        </header>
-
-        <form className="auth-form" onSubmit={handleSubmit}>
-          <label>Usuario</label>
-          <input
-            type="text"
-            placeholder="Crea un usuario"
+    <>
+      <TopBar title="Crear cuenta" />
+      <Screen tabs={false}>
+        <form className="stack stack--lg" onSubmit={submit} noValidate>
+          <Field
+            label="Usuario (como quieres que te llamemos)"
             value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            required
+            onChange={(event) => setUsername(event.target.value)}
+            autoComplete="username"
+            autoCapitalize="none"
+            maxLength={80}
           />
-
-          <label>Correo</label>
-          <input
+          <Field
+            label="Correo (opcional)"
             type="email"
-            placeholder="correo@ejemplo.com"
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            onChange={(event) => setEmail(event.target.value)}
+            autoComplete="email"
+            placeholder="nombre@correo.cl"
           />
-
-          <label>Contraseña</label>
-          <input
+          <Field
+            label="Contraseña (mínimo 6 caracteres)"
             type="password"
-            placeholder="Mínimo 6 caracteres"
             value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
+            onChange={(event) => setPassword(event.target.value)}
+            autoComplete="new-password"
           />
 
-          <button type="submit">Registrarme</button>
+          {error && (
+            <p className="form-error" role="alert">
+              {error}
+            </p>
+          )}
+
+          <Button label="Crear cuenta" type="submit" size="lg" loading={busy} />
+          <Notice icon="lock">
+            Solo guardamos tu usuario, tu correo y los textos de tus traducciones. Nunca videos ni
+            audios.
+          </Notice>
         </form>
-
-        <p className="auth-link">
-          ¿Ya tienes cuenta? <Link to="/login">Iniciar sesión</Link>
-        </p>
-
-        {message && <p className="message">{message}</p>}
-      </section>
-    </main>
+      </Screen>
+    </>
   );
 }
 

@@ -1,0 +1,658 @@
+/*
+  Cámara y reconocimiento: las mismas reglas de ui.css (versión anterior),
+  solo con los colores de la paleta EnSeñas. Los componentes de la cámara
+  (HandCamera, FaceCheck, SignWords, HandIllustration, Modal) no cambiaron:
+  siguen usando estas clases.
+*/
+
+/* Color por función: los componentes usan --c y --c-soft */
+.a-c-blue { --c: var(--tone-blue); --c-soft: var(--tone-blue-soft); }
+.a-c-green { --c: var(--tone-green); --c-soft: var(--tone-green-soft); }
+.a-c-purple { --c: var(--tone-purple); --c-soft: var(--tone-purple-soft); }
+.a-c-amber { --c: var(--tone-amber); --c-soft: var(--tone-amber-soft); }
+.a-c-red { --c: var(--tone-red); --c-soft: var(--tone-red-soft); }
+.a-c-gray { --c: var(--tone-gray); --c-soft: var(--tone-gray-soft); }
+
+/* ---------------------------------------------------------- video */
+
+.hand-camera {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  background: #111827;
+  overflow: hidden;
+}
+
+.camera-video,
+.camera-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scaleX(-1);
+}
+
+.camera-canvas {
+  z-index: 2;
+}
+
+.camera-status {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  z-index: 3;
+  background: rgba(0, 0, 0, 0.65);
+  color: white;
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: 999px;
+}
+
+.camera-device-select {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 4;
+  max-width: 160px;
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 12px;
+  color: white;
+  background: rgba(0, 0, 0, 0.62);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/* El borde avisa qué pasa: gris sin mano, verde con mano, rojo grabando */
+.a-camera {
+  position: relative;
+  height: min(50svh, 420px);
+  min-height: 280px;
+  border: 5px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: #0f172a;
+  transition: border-color 0.2s ease;
+}
+
+.a-camera[hidden] {
+  display: none;
+}
+
+.a-camera[data-phase="recording"] {
+  border-color: var(--capturing-bg);
+  animation: a-rec-border 1.2s ease-in-out infinite;
+}
+.a-camera[data-phase="analyzing"] { border-color: var(--processing-bg); }
+.a-camera[data-phase="hand"] { border-color: var(--result-bg); }
+.a-camera[data-phase="confirming"] { border-color: var(--processing-bg); }
+.a-camera[data-phase="error"] { border-color: var(--error-bg); }
+.a-camera[data-phase="success"] { border-color: var(--result-bg); }
+
+.a-camera-badge {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 6;
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: rgba(15, 23, 42, 0.62);
+  color: #ffffff;
+}
+
+.a-camera-badge svg {
+  width: 32px;
+  height: 32px;
+}
+
+.a-camera-badge[data-tone="green"] { background: #17633a; }
+
+/* Indicadores de mano y cara sobre la cámara */
+.a-camera-badges {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 8;
+  display: flex;
+  gap: 8px;
+}
+
+.a-camera-badges .a-camera-badge {
+  position: static;
+}
+
+/* Mientras graba: punto rojo y tiempo transcurrido */
+.a-rec-badge {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: #b3261e;
+  color: #ffffff;
+  font-size: 26px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.a-rec-badge svg {
+  width: 18px;
+  height: 18px;
+  animation: a-blink 1s ease-in-out infinite;
+}
+
+/* Analizando la grabación */
+.a-analyzing {
+  position: absolute;
+  inset: 0;
+  z-index: 7;
+  display: grid;
+  place-items: center;
+  background: rgba(15, 23, 42, 0.6);
+  color: #ffffff;
+}
+
+.a-analyzing .a-dots span {
+  width: 22px;
+  height: 22px;
+}
+
+.a-dots {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.a-dots span {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: a-dots 1.2s infinite;
+}
+
+.a-dots span:nth-child(2) { animation-delay: 0.2s; }
+.a-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+/* Guía de encuadre (diseño EnSeñas): cabeza y hombros + marco para las manos */
+.camera-guide {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+}
+
+.camera-guide-head {
+  position: absolute;
+  top: 22px;
+  left: 50%;
+  width: 84px;
+  height: 104px;
+  transform: translateX(-50%);
+  border: 3px dashed rgba(255, 255, 255, 0.9);
+  border-radius: 52px;
+}
+
+.camera-guide-hands {
+  position: absolute;
+  bottom: 58px;
+  left: 9%;
+  right: 9%;
+  height: 110px;
+  border: 3px dashed rgba(255, 255, 255, 0.9);
+  border-radius: 44px;
+}
+
+.camera-guide-chip {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  display: flex;
+  justify-content: center;
+}
+
+.camera-guide-chip span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.72);
+  color: #ffffff;
+  font-size: var(--fs-caption);
+  text-align: center;
+}
+
+.camera-guide-chip svg {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+/* ---------------------------------------------------------- señas */
+
+.a-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  display: grid;
+  gap: 14px;
+}
+
+.a-section-title {
+  margin: 6px 4px 0;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.a-hint {
+  margin: 0;
+  font-size: var(--fs-caption);
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
+.a-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.a-chip--new {
+  animation: a-pop 0.45s ease both;
+}
+
+/* Resultado de la traducción: una ficha grande por seña, en orden */
+.a-words {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.a-word-chip {
+  padding: 10px 18px;
+  border-radius: 18px;
+  background: var(--c-soft);
+  color: var(--c);
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.1;
+}
+
+/* Expresión de la cara que acompañó a una o más señas: un recuadro con la
+   expresión arriba, como la marca sobre la glosa */
+.a-expr-group {
+  --e: var(--tone-amber);
+  --e-soft: var(--tone-amber-soft);
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px 10px;
+  border: 3px solid var(--e);
+  border-radius: 24px;
+  background: var(--e-soft);
+}
+
+.a-expr-group[data-tone="red"] { --e: var(--tone-red); --e-soft: var(--tone-red-soft); }
+.a-expr-group[data-tone="green"] { --e: var(--tone-green); --e-soft: var(--tone-green-soft); }
+.a-expr-group[data-tone="purple"] { --e: var(--tone-purple); --e-soft: var(--tone-purple-soft); }
+.a-expr-group[data-tone="blue"] { --e: var(--tone-blue); --e-soft: var(--tone-blue-soft); }
+.a-expr-group[data-tone="gray"] { --e: var(--tone-gray); --e-soft: var(--tone-gray-soft); }
+
+.a-expr-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px 4px 6px;
+  border-radius: 999px;
+  background: var(--e);
+  color: var(--on-tone);
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.a-expr-tag:not(:has(> :nth-child(2))) {
+  padding: 4px 8px;
+}
+
+.a-expr-emoji {
+  font-size: 22px;
+  line-height: 1;
+}
+
+.a-expr-words {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.a-expr-words .a-word-chip {
+  background: var(--surface);
+}
+
+.a-expr-group--alone {
+  padding: 6px;
+}
+
+.a-expr-group--alone .a-expr-tag {
+  padding: 8px 18px 8px 12px;
+  font-size: 22px;
+}
+
+.a-expr-group--alone .a-expr-emoji {
+  font-size: 36px;
+}
+
+.a-expr-group--alone .a-expr-tag:not(:has(> :nth-child(2))) {
+  padding: 8px 12px;
+}
+
+/* Con expresiones, las fichas sueltas quedan a la altura de las palabras
+   de los recuadros (debajo de la marca de la cara), como en la glosa */
+.a-words--marked > .a-word-chip {
+  margin-bottom: 13px;
+}
+
+/* En el historial las palabras van más chicas */
+.a-words--history {
+  gap: 8px;
+}
+
+.a-words--history .a-word-chip {
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 18px;
+}
+
+.a-words--history .a-expr-group--alone .a-expr-tag {
+  font-size: 16px;
+}
+
+.a-words--history .a-expr-group--alone .a-expr-emoji {
+  font-size: 26px;
+}
+
+.a-tip {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  background: var(--tone-amber-soft);
+  color: var(--tone-amber);
+  font-size: var(--fs-caption);
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+/* ---------------------------------------------------------- ventana */
+
+.a-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(14, 23, 27, 0.72);
+}
+
+.a-modal {
+  position: relative;
+  width: min(480px, 100%);
+  padding: 24px 18px 22px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  display: grid;
+  justify-items: center;
+  gap: 18px;
+  animation: a-pop 0.3s ease;
+}
+
+.a-modal-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+}
+
+.a-icon-btn {
+  width: 52px;
+  height: 52px;
+  flex-shrink: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  background: var(--surface-alt);
+  color: var(--text);
+}
+
+.a-icon-btn svg {
+  width: 26px;
+  height: 26px;
+}
+
+/* ---------------------------------------------------------- grabar señas */
+
+.a-countdown {
+  position: absolute;
+  inset: 0;
+  z-index: 7;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 4px;
+  background: rgba(15, 23, 42, 0.45);
+  color: #ffffff;
+  font-weight: 700;
+}
+
+.a-countdown strong {
+  font-size: 88px;
+  line-height: 1;
+}
+
+.a-progress {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: 14px;
+  z-index: 6;
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.35);
+}
+
+.a-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #ff8a80;
+}
+
+.a-sample-chip {
+  min-height: 48px;
+  padding: 8px 14px;
+  border: 2px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--fs-caption);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.a-sample-chip.is-done {
+  border-color: var(--tone-green);
+  background: var(--tone-green-soft);
+  color: var(--tone-green);
+}
+
+.a-sample-chip.is-selected {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary);
+}
+
+.a-sample-chip:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.a-code {
+  display: block;
+  overflow-x: auto;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #0f172a;
+  color: #e2e8f0;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.a-message {
+  margin: 0;
+  color: var(--text-muted);
+  text-align: center;
+  font-size: var(--fs-caption);
+  font-weight: 700;
+}
+
+/* Lo que lee la cámara: malla, dónde está la mano y rendimiento */
+.a-facecheck-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+}
+
+.a-facecheck-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 6px 4px 6px 12px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--surface-alt);
+  color: var(--primary);
+  font-size: 15px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.a-switch {
+  position: relative;
+  width: 52px;
+  height: 30px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: var(--border);
+  transition: background 0.2s ease;
+  transform: scale(0.8);
+}
+
+.a-switch::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--surface);
+  transition: transform 0.2s ease;
+}
+
+.a-facecheck-toggle[aria-checked="true"] .a-switch {
+  background: var(--primary);
+}
+
+.a-facecheck-toggle[aria-checked="true"] .a-switch::after {
+  transform: translateX(22px);
+}
+
+.a-facecheck-ok {
+  margin: 0;
+  color: var(--tone-green);
+  font-size: var(--fs-caption);
+  font-weight: 700;
+}
+
+.face-spot {
+  display: grid;
+  gap: 8px;
+}
+
+/* Zona de la cara donde está la mano (la encendida es la actual) */
+.face-zones {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.face-zone {
+  padding: 6px 12px;
+  border: 2px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-size: 15px;
+  font-weight: 700;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.face-zone.is-on {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--on-primary);
+}
+
+.a-facecheck-stats {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------------------------------------------------------- animaciones */
+
+@keyframes a-pop {
+  0% { transform: scale(0.6); opacity: 0; }
+  70% { transform: scale(1.08); opacity: 1; }
+  100% { transform: scale(1); }
+}
+
+@keyframes a-rec-border {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(179, 38, 30, 0.5); }
+  50% { box-shadow: 0 0 0 12px rgba(179, 38, 30, 0); }
+}
+
+@keyframes a-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+
+@keyframes a-dots {
+  0%, 80%, 100% { opacity: 0.2; }
+  40% { opacity: 1; }
+}

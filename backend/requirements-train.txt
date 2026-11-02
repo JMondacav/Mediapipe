@@ -1,0 +1,4 @@
+# Solo para entrenar el modelo de señas dinámicas (api/train_dynamic.py).
+# El backend NO lo necesita: la predicción corre con numpy.
+numpy
+tensorflow>=2.16
