@@ -11,6 +11,8 @@ backend/data/
 backend/api/landmarks_*.csv
 backend/api/model_report_*.json
 backend/api/modelo_lsch.backup.pkl
+backend/api/modelo_dinamico.backup.npz
+backend/api/modelo_dinamico.tmp.npz
 backend/api/hand_landmarker.task
 frontend/certs/
 

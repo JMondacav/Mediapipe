@@ -1,65 +1,74 @@
 import { useState } from "react";
-import { useNavigate, Link } from "react-router-dom";
-import { loginUser } from "../services/api";
-import "../App.css";
+import { useNavigate } from "react-router-dom";
+import TopBar from "../components/TopBar";
+import { Button, Field, Screen } from "../components/ui";
+import { useAuth } from "../context/auth";
 
 function Login() {
   const navigate = useNavigate();
-
+  const { signIn } = useAuth();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
 
-  const handleSubmit = async (event) => {
+  const submit = async (event) => {
     event.preventDefault();
 
+    if (!username.trim() || !password) {
+      setError("Escribe tu usuario y tu contraseña.");
+      return;
+    }
+
+    setBusy(true);
+    setError("");
+
     try {
-      await loginUser(username, password);
-      setMessage("Inicio de sesión correcto");
-      navigate("/menu");
-    } catch (error) {
-      console.error(error);
-      setMessage("Usuario o contraseña incorrectos");
+      await signIn(username, password);
+      navigate("/home", { replace: true });
+    } catch (err) {
+      console.error(err);
+      setError("Usuario o contraseña incorrectos.");
+    } finally {
+      setBusy(false);
     }
   };
 
   return (
-    <main className="app-container">
-      <section className="phone-frame auth-frame">
-        <header className="app-header">
-          <h1>EnseñaVos</h1>
-          <p>Iniciar sesión</p>
-        </header>
-
-        <form className="auth-form" onSubmit={handleSubmit}>
-          <label>Usuario</label>
-          <input
-            type="text"
-            placeholder="Ingresa tu usuario"
+    <>
+      <TopBar title="Entrar con mi cuenta" />
+      <Screen tabs={false}>
+        <form className="stack stack--lg" onSubmit={submit} noValidate>
+          <Field
+            label="Usuario"
             value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            required
+            onChange={(event) => setUsername(event.target.value)}
+            autoComplete="username"
+            autoCapitalize="none"
           />
-
-          <label>Contraseña</label>
-          <input
+          <Field
+            label="Contraseña"
             type="password"
-            placeholder="Ingresa tu contraseña"
             value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
+            onChange={(event) => setPassword(event.target.value)}
+            autoComplete="current-password"
           />
 
-          <button type="submit">Ingresar</button>
+          {error && (
+            <p className="form-error" role="alert">
+              {error}
+            </p>
+          )}
+
+          <Button label="Entrar" type="submit" size="lg" loading={busy} />
+          <Button
+            label="No tengo cuenta"
+            variant="ghost"
+            onClick={() => navigate("/register", { replace: true })}
+          />
         </form>
-
-        <p className="auth-link">
-          ¿No tienes cuenta? <Link to="/register">Crear cuenta</Link>
-        </p>
-
-        {message && <p className="message">{message}</p>}
-      </section>
-    </main>
+      </Screen>
+    </>
   );
 }
 

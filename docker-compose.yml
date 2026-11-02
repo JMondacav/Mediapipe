@@ -23,3 +23,28 @@ services:
     command: npm run dev -- --host 0.0.0.0
     depends_on:
       - backend
+
+  # Prototipo accesible para personas sordas (copia de frontend/ rediseñada).
+  frontend-accesible:
+    build: ./frontend-accesible
+    container_name: ensenavos_frontend_accesible
+    ports:
+      - "5174:5173"
+    volumes:
+      - ./frontend-accesible:/app
+      - /app/node_modules
+    environment:
+      VITE_PROXY_TARGET: "http://backend:8000"
+    command: npm run dev -- --host 0.0.0.0
+    depends_on:
+      - backend
+
+  # Solo para entrenar el modelo de señas dinámicas; no arranca con "up".
+  # Uso: docker compose --profile train run --rm trainer
+  trainer:
+    image: tensorflow/tensorflow:2.18.0
+    profiles: ["train"]
+    working_dir: /app
+    volumes:
+      - ./backend:/app
+    command: python3 api/train_dynamic.py

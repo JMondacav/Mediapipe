@@ -1,0 +1,38 @@
+VIDEOS DE LAS FRASES EN SEÑAS (LSCh)
+
+La persona oyente toca una frase (Traducir > Voz, o Inicio en modo Voz) y la
+app muestra en grande el video de su seña para la persona sorda.
+
+Pon aquí un .mp4 por frase, corto, sin sonido, de una persona haciendo la
+seña (idealmente una persona sorda o un intérprete de LSCh). El nombre del
+archivo es el de la izquierda. Si el video no existe, la app muestra el aviso
+"Video de la seña en LSCh: pendiente de contenido".
+
+Saludos
+  hola.mp4            Hola, ¿cómo estás?
+  gracias.mp4         Muchas gracias
+  por-favor.mp4       Por favor
+
+Ayuda
+  soy-sordo.mp4       Soy una persona sorda. Uso Lengua de Señas Chilena.
+  escribir.mp4        ¿Puedes escribirlo, por favor?
+  repetir.mp4         ¿Puedes repetir más despacio?
+  no-entiendo.mp4     No entiendo. ¿Me puedes ayudar?
+  ayuda.mp4           Necesito ayuda
+
+Salud
+  dolor.mp4           Me duele aquí. Necesito atención médica.
+  medico.mp4          Necesito hablar con un médico
+  interprete.mp4      Necesito un intérprete de lengua de señas
+
+Compras
+  precio.mp4          ¿Cuánto cuesta?
+  tarjeta.mp4         ¿Puedo pagar con tarjeta?
+  bolsa.mp4           ¿Me da una bolsa, por favor?
+
+Transporte
+  donde.mp4           ¿Dónde queda esta dirección?
+  paradero.mp4        ¿Dónde está el paradero?
+
+Para agregar o cambiar frases: frontend/src/data/phrases.js (el "id" de cada
+frase es el nombre de su video).

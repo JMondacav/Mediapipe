@@ -288,3 +288,133 @@ export async function predictSign(landmarks) {
 
   return data;
 }
+
+export async function getDynamicStatus() {
+  const response = await fetch(`${API_URL}/dynamic/status/`, {
+    headers: getAuthHeaders(),
+  });
+
+  const data = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    throw new Error(getApiError(data, "Error al consultar el modelo dinamico"));
+  }
+
+  return data;
+}
+
+// Los envíos grandes (grabaciones) se comprimen con gzip: los números en JSON
+// quedan ~4 veces más livianos, y en el celular subir datos es lo que más
+// demora. Si el navegador no puede comprimir, se envían igual.
+async function jsonRequest(data) {
+  const text = JSON.stringify(data);
+
+  if (text.length < 4096 || typeof CompressionStream === "undefined") {
+    return { body: text, headers: getAuthHeaders() };
+  }
+
+  try {
+    const stream = new Blob([text]).stream().pipeThrough(new CompressionStream("gzip"));
+    const body = await new Response(stream).arrayBuffer();
+    return { body, headers: { ...getAuthHeaders(), "Content-Encoding": "gzip" } };
+  } catch {
+    return { body: text, headers: getAuthHeaders() };
+  }
+}
+
+// Mientras se graba: analiza un trozo (lo nuevo más los 1,8 s anteriores).
+// Devuelve { steps, expression_steps, until }.
+export async function translateRecordingPartial(frames, aspectRatio, startT, afterT) {
+  const { body, headers } = await jsonRequest({
+    frames,
+    aspect_ratio: aspectRatio,
+    start_t: startT,
+    after_t: afterT,
+  });
+  const response = await fetch(`${API_URL}/translate/recording/partial/`, {
+    method: "POST",
+    headers,
+    body,
+  });
+
+  const data = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    throw new Error(getApiError(data, "Error al analizar la grabacion"));
+  }
+
+  return data;
+}
+
+// Grabar primero, traducir después: recibe las señas reconocidas, en el orden
+// en que salieron. Con `stream` (lo ya analizado mientras se grababa) solo se
+// envía el último trozo; sin él, la grabación completa.
+export async function translateRecording(frames, aspectRatio, stream = null) {
+  const { body, headers } = await jsonRequest({
+    frames,
+    aspect_ratio: aspectRatio,
+    ...(stream
+      ? {
+          start_t: stream.startT,
+          after_t: stream.afterT,
+          end_t: stream.endT,
+          steps: stream.steps,
+          expression_steps: stream.expressionSteps,
+        }
+      : {}),
+  });
+  const response = await fetch(`${API_URL}/translate/recording/`, {
+    method: "POST",
+    headers,
+    body,
+  });
+
+  const data = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    throw new Error(getApiError(data, "Error al traducir la grabacion"));
+  }
+
+  return data;
+}
+
+// kind: "sign" (seña con movimiento) o "expression" (expresión facial).
+export async function saveDynamicSample(label, frames, aspectRatio, kind = "sign") {
+  const { body, headers } = await jsonRequest({
+    label,
+    kind,
+    frames,
+    aspect_ratio: aspectRatio,
+  });
+  const response = await fetch(`${API_URL}/dynamic/samples/`, {
+    method: "POST",
+    headers,
+    body,
+  });
+
+  const data = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    throw new Error(getApiError(data, "Error al guardar la muestra"));
+  }
+
+  return data;
+}
+
+export async function deleteDynamicSample(label, file, kind = "sign") {
+  const response = await fetch(
+    `${API_URL}/dynamic/samples/${encodeURIComponent(label)}/${encodeURIComponent(file)}/?kind=${kind}`,
+    {
+      method: "DELETE",
+      headers: getAuthHeaders(),
+    }
+  );
+
+  const data = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    throw new Error(getApiError(data, "Error al borrar la muestra"));
+  }
+
+  return data;
+}

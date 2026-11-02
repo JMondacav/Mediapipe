@@ -54,3 +54,28 @@ def predict_landmarks(flat_landmarks):
         confidence = float(np.max(probs))
 
     return {"label": label, "confidence": confidence}
+
+
+def predict_landmarks_batch(hands):
+    """
+    Igual que predict_landmarks, para varias manos de una sola vez (mucho más
+    rápido). Agrega "runner_up": la confianza de la segunda letra más probable.
+    """
+    if not hands:
+        return []
+
+    model = get_model()
+    X = pd.DataFrame([normalize_landmarks(hand) for hand in hands], columns=COLUMNAS)
+    labels = model.predict(X)
+    probs = model.predict_proba(X) if hasattr(model, "predict_proba") else None
+    results = []
+
+    for index, label in enumerate(labels):
+        ranked = np.sort(probs[index])[::-1] if probs is not None else np.zeros(2)
+        results.append({
+            "label": label,
+            "confidence": float(ranked[0]),
+            "runner_up": float(ranked[1]) if len(ranked) > 1 else 0.0,
+        })
+
+    return results

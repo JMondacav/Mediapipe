@@ -1,0 +1,22 @@
+VIDEOS DE SEÑAS (LSCh)
+
+Pon aquí videos .mp4 cortos (3 a 6 s), sin sonido, de una persona haciendo la
+seña. Si un video no existe, la app muestra el ícono en su lugar.
+
+Menú:
+  menu-traducir.mp4      seña de "traducir"
+  menu-practicar.mp4     seña de "practicar"
+  menu-historial.mp4     seña de "historial"
+
+Ayuda (botón "?"):
+  ayuda-inicio.mp4       cómo entrar: tocar tu animal y marcar tu PIN
+  ayuda-menu.mp4         qué hace cada botón del menú
+  ayuda-traductor.mp4    cómo usar el traductor
+  ayuda-practica.mp4     cómo practicar
+
+Práctica:
+  letra-a.mp4  letra-l.mp4  letra-u.mp4  letra-ily.mp4
+
+Palabras (cuando la persona oyente habla con el micrófono):
+  palabras/hola.mp4, palabras/gracias.mp4, ...
+  Nombre en minúsculas, sin tildes y con la ñ como n (año -> ano.mp4).
