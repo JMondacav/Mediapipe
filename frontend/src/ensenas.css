@@ -1196,6 +1196,80 @@ textarea.input {
   --size: 72px !important;
 }
 
+/* ---------------------------------------------------------- voz */
+
+/* Estado de la voz para la persona oyente (cargando, sonando, error). Arriba
+   y encima de todo, también de la pantalla completa (.show, z-index 60). */
+.speech-banner-wrap {
+  position: fixed;
+  top: calc(8px + env(safe-area-inset-top, 0px));
+  left: 16px;
+  right: 16px;
+  z-index: 70;
+  max-width: 608px;
+  margin: 0 auto;
+  pointer-events: none;
+}
+
+.speech-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow);
+  font-weight: 700;
+  animation: e-fade-up 0.2s ease-out both;
+}
+
+.speech-banner--loading {
+  background: var(--processing-bg);
+  color: var(--processing-fg);
+}
+
+.speech-banner--playing {
+  background: var(--result-bg);
+  color: var(--result-fg);
+}
+
+/* Solo el error recibe toques (para cerrarlo); los demás dejan tocar lo de abajo */
+.speech-banner--error {
+  background: var(--error-bg);
+  color: var(--error-fg);
+  pointer-events: auto;
+}
+
+.speech-banner p {
+  flex: 1;
+  margin: 0;
+  font-size: var(--fs-body);
+}
+
+.speech-banner > svg {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+}
+
+.speech-banner-close {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  margin: -8px -8px -8px 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.speech-banner-close svg {
+  width: 24px;
+  height: 24px;
+}
+
 /* ---------------------------------------------------------- animaciones */
 
 @keyframes e-spin {

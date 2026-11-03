@@ -418,3 +418,32 @@ export async function deleteDynamicSample(label, file, kind = "sign") {
 
   return data;
 }
+
+const AUDIO_ERROR = "No se pudo cargar el audio. Inténtalo de nuevo.";
+
+// Voz natural para la persona oyente: devuelve el texto leído en voz alta,
+// en MP3 (Blob). voice: "female" o "male", la que se eligió en Perfil. Si no
+// hay internet o el servicio de voz no responde, lanza un error con el aviso
+// listo para mostrar en pantalla.
+export async function synthesizeSpeech(text, voice = "female") {
+  let response;
+
+  try {
+    response = await fetch(`${API_URL}/tts/`, {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ text, voice }),
+    });
+  } catch {
+    // El teléfono no tiene conexión: fetch falla sin llegar al servidor.
+    throw new Error("No se pudo cargar el audio. Revisa tu conexión a internet.");
+  }
+
+  if (!response.ok) {
+    const data = await response.json().catch(() => null);
+    // 503: el servicio de voz no respondió y el backend manda el aviso en español.
+    throw new Error(response.status === 503 ? getApiError(data, AUDIO_ERROR) : AUDIO_ERROR);
+  }
+
+  return response.blob();
+}

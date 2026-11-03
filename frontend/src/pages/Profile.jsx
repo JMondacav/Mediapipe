@@ -4,6 +4,7 @@ import { Button, Notice, RoleCard, Screen, Segmented, SettingRow } from "../comp
 import { useAuth } from "../context/auth";
 import { useSettings } from "../context/settings";
 import { getStats } from "../services/api";
+import { speak } from "../utils/feedback";
 
 function Profile() {
   const navigate = useNavigate();
@@ -97,6 +98,22 @@ function Profile() {
         value={settings.autoSpeak}
         onChange={(value) => update({ autoSpeak: value })}
       />
+      <p className="t-label">Voz para la otra persona</p>
+      <Segmented
+        label="Voz para la otra persona"
+        value={settings.voice}
+        onChange={(value) => update({ voice: value })}
+        options={[
+          { value: "female", label: "Femenina" },
+          { value: "male", label: "Masculina" },
+        ]}
+      />
+      <Button
+        label="Probar voz"
+        icon="speaker"
+        variant="secondary"
+        onClick={() => speak("Hola, así sonará mi voz cuando traduzca mis señas.")}
+      />
 
       <h2 className="t-h2">Mi uso</h2>
       <div className="card stat-list">
@@ -111,7 +128,8 @@ function Profile() {
       <Notice icon="lock">
         La cámara y el micrófono solo se activan en Traducir y en Grabar señas. Al servidor solo
         viajan números (los puntos de las manos y de la cara), nunca la imagen. Guardamos el texto
-        del resultado, no videos ni audios.
+        del resultado, no videos ni audios. Para leer en voz alta, el texto traducido se envía a un
+        servicio de voz de Microsoft; el audio no se guarda ni se asocia a tu identidad.
       </Notice>
 
       <Button label="Cerrar sesión" variant="secondary" icon="logout" onClick={logout} />

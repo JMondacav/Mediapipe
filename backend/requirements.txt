@@ -1,6 +1,7 @@
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
 SQLAlchemy==2.0.36
+edge-tts==7.3.1
 psycopg2-binary==2.9.12
 joblib==1.5.3
 mediapipe==0.10.35

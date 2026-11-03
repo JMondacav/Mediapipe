@@ -1,4 +1,6 @@
+import { useState, useSyncExternalStore } from "react";
 import useOnline from "../hooks/useOnline";
+import { getSpeechStatus, onSpeechStatus } from "../utils/feedback";
 import Icon from "./Icon";
 
 // Piezas básicas del diseño EnSeñas (botones, avisos, pictogramas, selectores).
@@ -181,5 +183,45 @@ export function Field({ label, multiline, ...input }) {
       <span className="field-label">{label}</span>
       <Control className="input" {...input} />
     </label>
+  );
+}
+
+const SPEECH_COPY = {
+  loading: { icon: "hourglass", text: "Cargando audio…" },
+  playing: { icon: "speaker", text: "Sonando en voz alta" },
+};
+
+// Estado de la voz para la persona oyente. La persona sorda no oye si el
+// teléfono ya está hablando, así que se lo mostramos. Un error queda a la
+// vista hasta cerrarlo o hasta la próxima lectura.
+export function SpeechBanner() {
+  const speech = useSyncExternalStore(onSpeechStatus, getSpeechStatus);
+  const [dismissed, setDismissed] = useState(null);
+  const visible = speech.status !== "idle" && speech !== dismissed;
+  const copy = SPEECH_COPY[speech.status];
+
+  return (
+    <div className="speech-banner-wrap" aria-live="polite">
+      {visible && speech.status === "error" && (
+        <div className="speech-banner speech-banner--error" role="alert">
+          <Icon name="alert-circle" />
+          <p>{speech.message}</p>
+          <button
+            type="button"
+            className="speech-banner-close"
+            aria-label="Cerrar aviso"
+            onClick={() => setDismissed(speech)}
+          >
+            <Icon name="close" />
+          </button>
+        </div>
+      )}
+      {visible && copy && (
+        <div className={`speech-banner speech-banner--${speech.status}`}>
+          <Icon name={copy.icon} />
+          <p>{copy.text}</p>
+        </div>
+      )}
+    </div>
   );
 }

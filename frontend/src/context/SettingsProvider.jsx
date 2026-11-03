@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { setVibrationEnabled } from "../utils/feedback";
+import { setSpeechVoice, setVibrationEnabled } from "../utils/feedback";
 import { DEFAULT_SETTINGS, SettingsContext } from "./settings";
 
 const STORAGE_KEY = "ensenas.settings";
@@ -29,6 +29,7 @@ function SettingsProvider({ children }) {
     }
 
     setVibrationEnabled(settings.haptics);
+    setSpeechVoice(settings.voice);
 
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));

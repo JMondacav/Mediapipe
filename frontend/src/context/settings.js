@@ -10,6 +10,8 @@ export const DEFAULT_SETTINGS = {
   haptics: true,
   // Lee en voz alta las señas traducidas, para la persona oyente
   autoSpeak: false,
+  // Voz natural con que se leen las señas: "female" o "male"
+  voice: "female",
   // "system" | "light" | "dark"
   themeMode: "system",
 };

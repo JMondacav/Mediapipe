@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import SignVideo from "../components/SignVideo";
 import SignWords from "../components/SignWords";
-import { Button, Picto } from "../components/ui";
+import { Button, Picto, SpeechBanner } from "../components/ui";
 import { speechText } from "../utils/expressions";
 import { canSpeak, speak } from "../utils/feedback";
 import { ShowContext } from "./show";
@@ -73,6 +73,7 @@ function ShowProvider({ children }) {
     <ShowContext.Provider value={setMessage}>
       {children}
       {message && <ShowOverlay message={message} onClose={close} />}
+      <SpeechBanner />
     </ShowContext.Provider>
   );
 }

@@ -1,6 +1,6 @@
 from typing import Literal
 
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
@@ -8,6 +8,7 @@ from . import models, schemas
 from .auth import create_token, get_current_user, hash_password, verify_password
 from .database import Base, engine, get_db
 from .gzip_request import GzipRequestMiddleware
+from .tts import SpeechIn, TTSUnavailable, synthesize
 
 Base.metadata.create_all(bind=engine)
 
@@ -469,3 +470,19 @@ def translate_recording(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error traduciendo la grabacion: {exc}",
         ) from exc
+
+
+@app.post("/api/tts/")
+async def text_to_speech(
+    payload: SpeechIn,
+    current_user: models.User = Depends(get_current_user),
+):
+    """Lee el texto en voz alta con una voz natural, para la persona oyente (MP3)."""
+    try:
+        audio = await synthesize(payload.text, payload.voice)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except TTSUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    return Response(content=audio, media_type="audio/mpeg")
