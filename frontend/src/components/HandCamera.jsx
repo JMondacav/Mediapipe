@@ -5,6 +5,14 @@ import {
   FilesetResolver,
   HandLandmarker,
 } from "@mediapipe/tasks-vision";
+import { createHandTracker } from "./handTracking";
+
+// requestVideoFrameCallback avisa justo cuando la cámara entrega un cuadro
+// nuevo (ni antes ni después). Sin él (navegadores antiguos) se revisa en
+// cada refresco de pantalla si cambió el cuadro.
+const HAS_VIDEO_FRAME_CALLBACK =
+  typeof HTMLVideoElement !== "undefined" &&
+  "requestVideoFrameCallback" in HTMLVideoElement.prototype;
 
 // Misma versión que el paquete instalado (package-lock): con "@latest" una
 // actualización del CDN podía romper la app sin tocar el código.
@@ -132,8 +140,12 @@ function HandCamera({
   const onStatsRef = useRef(onStats);
   const statsRef = useRef({ since: 0, frames: 0, handMs: 0, faceMs: 0, faceRuns: 0 });
   const animationRef = useRef(null);
+  const handTrackerRef = useRef(createHandTracker());
+  const statusRef = useRef("");
   const streamRef = useRef(null);
   const lastVideoTimeRef = useRef(-1);
+  const lastTimestampRef = useRef(0);
+  const frameCallbackRef = useRef(null);
   const isRunningRef = useRef(isRunning);
   const onLandmarksDetectedRef = useRef(onLandmarksDetected);
   const onFrameRef = useRef(onFrame);
@@ -247,6 +259,10 @@ function HandCamera({
           ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
           width: { ideal: 640 },
           height: { ideal: 480 },
+          // Sin pedirlo, varias cámaras de notebook entregan 15 cuadros por
+          // segundo (o menos con poca luz): el movimiento se ve a saltos y
+          // la seña llega con la mitad de los cuadros.
+          frameRate: { ideal: 30 },
         },
         audio: false,
       };
@@ -267,7 +283,7 @@ function HandCamera({
 
     async function startCamera(deviceId = "") {
       setCameraError("");
-      setStatus("Solicitando camara...");
+      showStatusText("Solicitando camara...");
       stopCurrentStream();
 
       const stream = await requestCamera(deviceId);
@@ -284,7 +300,7 @@ function HandCamera({
       await video.play();
 
       await loadDevices();
-      setStatus(readyMessage);
+      showStatusText(readyMessage);
     }
 
     // La cara, si se lee: en algunos cuadros se detecta y en el resto se
@@ -347,23 +363,128 @@ function HandCamera({
       statsRef.current = { since: nowInMs, frames: 0, handMs: 0, faceMs: 0, faceRuns: 0 };
     }
 
+    // El estado solo se actualiza cuando cambia (antes, 30 veces por segundo).
+    function showStatusText(text) {
+      if (statusRef.current !== text) {
+        statusRef.current = text;
+        setStatus(text);
+      }
+    }
+
+    // Procesa un cuadro nuevo de la cámara: manos, cara, envío y dibujo.
+    function processFrame(video, ctx, canvas, landmarker, drawingUtils) {
+      // MediaPipe exige tiempos siempre crecientes.
+      const nowInMs = Math.max(performance.now(), lastTimestampRef.current + 1);
+      lastTimestampRef.current = nowInMs;
+
+      const results = landmarker.detectForVideo(video, nowInMs);
+      statsRef.current.handMs += performance.now() - nowInMs;
+      statsRef.current.frames += 1;
+      const face = detectFace(video, nowInMs);
+      updateStats(nowInMs);
+
+      // Cada mano con su etiqueta estable y su versión suavizada (para dibujar).
+      const rawHandedness = results.handedness ?? results.handednesses ?? [];
+      const hands = handTrackerRef.current(
+        (results.landmarks ?? []).map((landmarks, index) => ({
+          landmarks,
+          category: rawHandedness[index]?.[0],
+        })),
+        nowInMs
+      );
+
+      onFrameRef.current?.({
+        timestamp: nowInMs,
+        aspectRatio: video.videoWidth / video.videoHeight,
+        // Los puntos van tal cual los entrega MediaPipe (sin suavizar).
+        hands: hands.map(({ handedness, landmarks }) => ({ handedness, landmarks })),
+        face: face ? { blendshapes: face.blendshapes, points: face.points } : null,
+      });
+
+      for (const { landmarks } of hands) {
+        onLandmarksDetectedRef.current?.(landmarks);
+      }
+
+      // Solo se borra y redibuja cuando llega un cuadro nuevo de la cámara.
+      // Antes se borraba en cada refresco de pantalla (60 por segundo) y
+      // se dibujaba con cada cuadro (30 por segundo): la mano parpadeaba.
+      if (hasDrawingRef.current) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        hasDrawingRef.current = false;
+      }
+
+      if (showLandmarksRef.current && (face || hands.length > 0)) {
+        hasDrawingRef.current = true;
+
+        if (face) {
+          const style = faceMeshRef.current ? FACE_MESH_STYLE : FACE_STYLE;
+
+          for (const [connections, color, lineWidth] of style) {
+            drawingUtils.drawConnectors(face.landmarks, connections, { color, lineWidth });
+          }
+
+          if (faceMeshRef.current) {
+            drawingUtils.drawLandmarks(face.landmarks, {
+              color: "#38bdf8",
+              fillColor: "#38bdf8",
+              lineWidth: 0,
+              radius: 1,
+            });
+          }
+        }
+
+        for (const { smoothed } of hands) {
+          drawingUtils.drawConnectors(smoothed, HandLandmarker.HAND_CONNECTIONS, {
+            color: "#00FFAA",
+            lineWidth: 4,
+          });
+
+          drawingUtils.drawLandmarks(smoothed, {
+            color: "#FF0055",
+            lineWidth: 2,
+            radius: 4,
+          });
+        }
+      }
+
+      showStatusText(hands.length > 0 ? "Mano detectada" : "No se detecta mano");
+    }
+
     function startDetectionLoop() {
+      let drawingUtils = null;
+      let drawingCtx = null;
+
+      const scheduleNext = () => {
+        const video = videoRef.current;
+
+        if (cancelled) {
+          return;
+        }
+
+        if (HAS_VIDEO_FRAME_CALLBACK && video) {
+          const id = video.requestVideoFrameCallback(detect);
+          frameCallbackRef.current = { video, id };
+        } else {
+          animationRef.current = requestAnimationFrame(detect);
+        }
+      };
+
       const detect = () => {
         const video = videoRef.current;
         const canvas = canvasRef.current;
         const landmarker = landmarkerRef.current;
 
-        if (!video || !canvas || !landmarker) {
-          animationRef.current = requestAnimationFrame(detect);
-          return;
-        }
-
-        if (video.videoWidth === 0 || video.videoHeight === 0) {
-          animationRef.current = requestAnimationFrame(detect);
+        if (!video || !canvas || !landmarker || video.videoWidth === 0 || video.videoHeight === 0) {
+          scheduleNext();
           return;
         }
 
         const ctx = canvas.getContext("2d");
+
+        if (ctx !== drawingCtx) {
+          drawingCtx = ctx;
+          drawingUtils = new DrawingUtils(ctx);
+        }
 
         // Asignar width/height borra el lienzo: solo se hace si cambia el tamaño.
         if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
@@ -376,86 +497,12 @@ function HandCamera({
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             hasDrawingRef.current = false;
           }
-        } else if (video.currentTime !== lastVideoTimeRef.current) {
-          // Solo se borra y redibuja cuando llega un cuadro nuevo de la cámara.
-          // Antes se borraba en cada refresco de pantalla (60 por segundo) y
-          // se dibujaba con cada cuadro (30 por segundo): la mano parpadeaba.
+        } else if (HAS_VIDEO_FRAME_CALLBACK || video.currentTime !== lastVideoTimeRef.current) {
           lastVideoTimeRef.current = video.currentTime;
-
-          const nowInMs = performance.now();
-          const results = landmarker.detectForVideo(video, nowInMs);
-          statsRef.current.handMs += performance.now() - nowInMs;
-          statsRef.current.frames += 1;
-          const face = detectFace(video, nowInMs);
-          updateStats(nowInMs);
-          ctx.clearRect(0, 0, canvas.width, canvas.height);
-          hasDrawingRef.current = false;
-
-          if (onFrameRef.current) {
-            const handedness = results.handedness ?? results.handednesses ?? [];
-
-            onFrameRef.current({
-              timestamp: nowInMs,
-              aspectRatio: video.videoWidth / video.videoHeight,
-              hands: (results.landmarks ?? []).map((landmarks, index) => ({
-                handedness: handedness[index]?.[0]?.categoryName ?? "",
-                landmarks,
-              })),
-              face: face ? { blendshapes: face.blendshapes, points: face.points } : null,
-            });
-          }
-
-          const hasHands = results.landmarks && results.landmarks.length > 0;
-
-          if (!showLandmarksRef.current) {
-            for (const landmarks of results.landmarks ?? []) {
-              onLandmarksDetectedRef.current?.(landmarks);
-            }
-          } else if (face || hasHands) {
-            const drawingUtils = new DrawingUtils(ctx);
-            hasDrawingRef.current = true;
-
-            if (face) {
-              const style = faceMeshRef.current ? FACE_MESH_STYLE : FACE_STYLE;
-
-              for (const [connections, color, lineWidth] of style) {
-                drawingUtils.drawConnectors(face.landmarks, connections, { color, lineWidth });
-              }
-
-              if (faceMeshRef.current) {
-                drawingUtils.drawLandmarks(face.landmarks, {
-                  color: "#38bdf8",
-                  fillColor: "#38bdf8",
-                  lineWidth: 0,
-                  radius: 1,
-                });
-              }
-            }
-
-            for (const landmarks of results.landmarks ?? []) {
-              drawingUtils.drawConnectors(
-                landmarks,
-                HandLandmarker.HAND_CONNECTIONS,
-                {
-                  color: "#00FFAA",
-                  lineWidth: 4,
-                }
-              );
-
-              drawingUtils.drawLandmarks(landmarks, {
-                color: "#FF0055",
-                lineWidth: 2,
-                radius: 4,
-              });
-
-              onLandmarksDetectedRef.current?.(landmarks);
-            }
-          }
-
-          setStatus(hasHands ? "Mano detectada" : "No se detecta mano");
+          processFrame(video, ctx, canvas, landmarker, drawingUtils);
         }
 
-        animationRef.current = requestAnimationFrame(detect);
+        scheduleNext();
       };
 
       detect();
@@ -463,7 +510,7 @@ function HandCamera({
 
     async function init() {
       try {
-        setStatus("Cargando modelo de MediaPipe...");
+        showStatusText("Cargando modelo de MediaPipe...");
 
         // La cámara se enciende mientras se descarga el modelo. Antes recién
         // se encendía al terminar la descarga y se veía negro unos segundos.
@@ -489,7 +536,7 @@ function HandCamera({
       } catch (error) {
         console.error("Error iniciando MediaPipe o camara:", error);
         setCameraError(error.message || error.name || "Error desconocido");
-        setStatus("Error: no se pudo iniciar camara o MediaPipe");
+        showStatusText("Error: no se pudo iniciar camara o MediaPipe");
       }
     }
 
@@ -500,6 +547,12 @@ function HandCamera({
 
       if (animationRef.current) {
         cancelAnimationFrame(animationRef.current);
+      }
+
+      if (frameCallbackRef.current) {
+        const { video, id } = frameCallbackRef.current;
+        video.cancelVideoFrameCallback?.(id);
+        frameCallbackRef.current = null;
       }
 
       stopCurrentStream();

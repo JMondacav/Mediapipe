@@ -283,6 +283,31 @@ de mano (por ejemplo, HOLA siempre con la mano abierta). Evitaba 5 errores
 con letras solas, pero con señas rápidas medía la forma de la seña vecina y
 borraba señas reales (sobre todo DEJAME_PENSAR). Se quitó.
 
+3.12 Manos más fluidas y etiqueta izquierda/derecha estable (4-11-2026)
+----------------------------------------------------------------------
+Problemas: (a) MediaPipe a veces cambia 1 a 3 cuadros la etiqueta de la
+mano (Left/Right); el servidor usa esa etiqueta para elegir la casilla de
+la mano, así que la mano "saltaba" a la otra casilla en medio de la seña.
+(b) El bucle revisaba en cada refresco de pantalla si había un cuadro
+nuevo. (c) Algunas cámaras de notebook entregan 15 cuadros por segundo si
+no se piden 30. (d) El dibujo de la mano temblaba con la mano quieta.
+Qué se hizo (components/HandCamera.jsx y components/handTracking.js, en
+las dos apps):
+- Cada mano se sigue por su posición entre cuadros y su etiqueta es un
+  promedio: solo cambia si MediaPipe insiste ~6 cuadros (0,2 s). Si se
+  pierde 1 o 2 cuadros, vuelve con la misma etiqueta. Si las dos manos
+  salen con la misma etiqueta, la menos segura toma la otra.
+- requestVideoFrameCallback: se procesa justo cada cuadro de la cámara
+  (con respaldo al método anterior en navegadores antiguos).
+- Se piden 30 cuadros por segundo a la cámara.
+- El dibujo de la mano usa un filtro "One Euro" (temblor quieto ~3 veces
+  menor, retraso de ~0,3 cuadros moviéndose rápido). SOLO el dibujo: los
+  puntos que van al servidor siguen siendo los de MediaPipe tal cual,
+  iguales a los de las muestras de entrenamiento.
+- El texto de estado ya no se actualiza 30 veces por segundo.
+Probado con secuencias simuladas (saltos de etiqueta, dos manos cruzadas,
+mano perdida 2 cuadros). Falta medirlo con la cámara real y en celulares.
+
 ======================================================================
 4. ¿CÓMO DECIDE SI ES LETRA O SEÑA? (EL CASO "N" CONTRA "HOLA")
 ======================================================================
