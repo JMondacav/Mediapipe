@@ -1,10 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import {
-  DrawingUtils,
-  FaceLandmarker,
-  FilesetResolver,
-  HandLandmarker,
-} from "@mediapipe/tasks-vision";
+import { DrawingUtils, FaceLandmarker, HandLandmarker } from "@mediapipe/tasks-vision";
+import { FACE_MODEL_URL, HAND_MODEL_URL, createTask, readFace } from "../utils/mediapipeTasks";
 import { createHandTracker } from "./handTracking";
 
 // requestVideoFrameCallback avisa justo cuando la cámara entrega un cuadro
@@ -14,18 +10,6 @@ const HAS_VIDEO_FRAME_CALLBACK =
   typeof HTMLVideoElement !== "undefined" &&
   "requestVideoFrameCallback" in HTMLVideoElement.prototype;
 
-// Misma versión que el paquete instalado (package-lock): con "@latest" una
-// actualización del CDN podía romper la app sin tocar el código.
-const WASM_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm";
-const HAND_MODEL_URL =
-  "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task";
-const FACE_MODEL_URL =
-  "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task";
-
-// Puntos de la cara que se envían al backend: punta de la nariz, frente,
-// mentón y los dos costados (FACE_POINT_IDS en backend/api/sequence_features.py).
-const FACE_POINT_IDS = [1, 10, 152, 234, 454];
-const BLENDSHAPE_COUNT = 52;
 // La cara cambia más lento que las manos: se lee en uno de cada 2 cuadros y,
 // si el dispositivo va justo, en uno de cada 3 o 4 (las manos siempre en
 // todos). Entre lecturas se reutiliza la última, si tiene menos de 350 ms.
@@ -56,58 +40,6 @@ const FACE_MESH_STYLE = [
   [FaceLandmarker.FACE_LANDMARKS_RIGHT_IRIS, "#38bdf8", 1.5],
 ];
 
-// Los archivos de MediaPipe se descargan una sola vez para manos y cara.
-let visionPromise = null;
-
-function loadVision() {
-  visionPromise ??= FilesetResolver.forVisionTasks(WASM_URL).catch((error) => {
-    visionPromise = null;
-    throw error;
-  });
-  return visionPromise;
-}
-
-// La tarjeta gráfica detecta más rápido (más cuadros por segundo y
-// movimiento más fluido); si el dispositivo no la permite, se usa la CPU.
-async function createTask(TaskClass, options) {
-  const vision = await loadVision();
-  const create = (delegate) =>
-    TaskClass.createFromOptions(vision, {
-      ...options,
-      baseOptions: { ...options.baseOptions, delegate },
-    });
-
-  try {
-    return await create("GPU");
-  } catch (gpuError) {
-    console.warn("GPU no disponible para MediaPipe, se usa CPU:", gpuError);
-    return create("CPU");
-  }
-}
-
-// Las 52 expresiones en el orden de su índice y los puntos de referencia.
-function readFace(result) {
-  const landmarks = result.faceLandmarks?.[0];
-  const categories = result.faceBlendshapes?.[0]?.categories;
-
-  if (!landmarks?.length || !categories?.length) {
-    return null;
-  }
-
-  const blendshapes = new Array(BLENDSHAPE_COUNT).fill(0);
-  categories.forEach(({ index, score }) => {
-    if (index >= 0 && index < BLENDSHAPE_COUNT) {
-      blendshapes[index] = score;
-    }
-  });
-
-  return {
-    blendshapes,
-    points: FACE_POINT_IDS.flatMap((id) => [landmarks[id].x, landmarks[id].y, landmarks[id].z]),
-    landmarks,
-  };
-}
-
 function HandCamera({
   isRunning,
   onLandmarksDetected,
@@ -120,7 +52,7 @@ function HandCamera({
   // Dibuja la malla completa de la cara (478 puntos) en vez del dibujo sutil.
   faceMesh = false,
   // Dibuja los puntos de las manos y de la cara sobre el video. En Traducir
-  // no se dibujan (se detectan igual); en Grabar señas sí, para revisar.
+  // no se dibujan (se detectan igual).
   showLandmarks = true,
   // Recibe cada ~1 s: { fps, handMs, faceMs, faceEvery, facePoints }.
   onStats,
@@ -353,8 +285,10 @@ function HandCamera({
         faceEveryRef.current -= 1;
       }
 
+      const fps = (stats.frames * 1000) / elapsed;
+
       onStatsRef.current?.({
-        fps: Math.round((stats.frames * 1000) / elapsed),
+        fps: Math.round(fps),
         handMs: Math.round(handMs * 10) / 10,
         faceMs: Math.round(faceMs * 10) / 10,
         faceEvery: faceEveryRef.current,

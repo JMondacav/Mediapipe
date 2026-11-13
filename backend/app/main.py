@@ -2,6 +2,7 @@ from typing import Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Response, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from sqlalchemy.orm import Session
 
 from . import models, schemas
@@ -19,6 +20,8 @@ app = FastAPI(
 )
 
 app.add_middleware(GzipRequestMiddleware)
+# Respuestas comprimidas.
+app.add_middleware(GZipMiddleware, minimum_size=2048)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -340,6 +343,39 @@ def create_dynamic_sample(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/dynamic/samples/{label}/")
+def list_dynamic_samples(
+    label: str,
+    kind: Literal["sign", "expression"] = "sign",
+    current_user: models.User = Depends(get_current_user),
+):
+    from api.dynamic_samples import list_samples
+
+    try:
+        return {"samples": list_samples(label, kind)}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get("/api/dynamic/samples/{label}/{filename}/")
+def get_dynamic_sample(
+    label: str,
+    filename: str,
+    kind: Literal["sign", "expression"] = "sign",
+    current_user: models.User = Depends(get_current_user),
+):
+    from api.dynamic_samples import read_sample
+
+    try:
+        return read_sample(label, filename, kind)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @app.delete("/api/dynamic/samples/{label}/{filename}/")

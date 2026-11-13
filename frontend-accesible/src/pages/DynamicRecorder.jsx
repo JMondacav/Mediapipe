@@ -23,7 +23,7 @@ const MIN_HANDS_RATIO = 0.6;
 const MIN_FACE_RATIO = 0.6;
 const MIN_FRAMES = 8;
 const RECOMMENDED_SAMPLES = 30;
-const REPETITION_OPTIONS = [1, 5, 10, 20];
+const REPETITION_OPTIONS = [1, 5, 10, 20, 40];
 
 // Qué se graba en cada pestaña.
 const KINDS = {

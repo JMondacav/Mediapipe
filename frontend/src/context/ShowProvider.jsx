@@ -39,11 +39,15 @@ function ShowOverlay({ message, onClose }) {
   return (
     <div className="show" role="dialog" aria-modal="true" aria-label="Mensaje para la otra persona">
       <div className="show-content" aria-live="polite">
-        {video ? <SignVideo key={video} id={video} icon={icon} /> : icon && <Picto name={icon} size={140} />}
+        {video ? (
+          <SignVideo key={video} id={video} icon={icon} />
+        ) : (
+          icon && <Picto name={icon} size={140} />
+        )}
         {items?.length ? (
           <SignWords items={items} animate={false} className="a-c-blue" />
         ) : (
-          <p className="show-text">{text || "Sin mensaje"}</p>
+          <p className={`show-text ${video ? "show-text--sub" : ""}`}>{text || "Sin mensaje"}</p>
         )}
       </div>
 

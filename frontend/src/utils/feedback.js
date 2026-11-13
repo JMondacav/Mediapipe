@@ -201,10 +201,48 @@ function playBlob(blob, myTurn) {
   });
 }
 
+// Audios ya pedidos (o en camino), por voz y texto. Así "Escuchar" suena al
+// instante si la traducción se precargó (prefetchSpeech) o ya se escuchó.
+const AUDIO_CACHE_SIZE = 30;
+const audioCache = new Map();
+
+function speechAudio(text, voice) {
+  const key = `${voice}|${text}`;
+  let audio = audioCache.get(key);
+
+  if (audio) {
+    audioCache.delete(key);
+  } else {
+    audio = synthesizeSpeech(text, voice);
+    // Si falla, se vuelve a pedir la próxima vez.
+    audio.catch(() => audioCache.delete(key));
+  }
+
+  audioCache.set(key, audio);
+
+  if (audioCache.size > AUDIO_CACHE_SIZE) {
+    audioCache.delete(audioCache.keys().next().value);
+  }
+
+  return audio;
+}
+
+// Descarga el audio de un texto sin reproducirlo, para que al tocar
+// "Escuchar" no haya que esperar la red.
+export function prefetchSpeech(text) {
+  if (!canSpeak() || !text) {
+    return;
+  }
+
+  for (const chunk of splitSpeech(text)) {
+    speechAudio(chunk, speechVoice).catch(() => {});
+  }
+}
+
 // Pide los trozos de a uno: mientras suena uno se descarga el siguiente, y
 // nunca más de uno por adelantado.
 async function playChunks(chunks, voice, myTurn) {
-  let next = synthesizeSpeech(chunks[0], voice);
+  let next = speechAudio(chunks[0], voice);
 
   for (let index = 0; index < chunks.length; index += 1) {
     const blob = await next;
@@ -213,7 +251,7 @@ async function playChunks(chunks, voice, myTurn) {
       return;
     }
 
-    next = index + 1 < chunks.length ? synthesizeSpeech(chunks[index + 1], voice) : null;
+    next = index + 1 < chunks.length ? speechAudio(chunks[index + 1], voice) : null;
     // Si falla, el error se muestra al llegar a ese trozo.
     next?.catch(() => {});
 

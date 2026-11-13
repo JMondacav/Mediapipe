@@ -16,7 +16,7 @@ import { useShow } from "../context/show";
 import useRecordingTranslator from "../hooks/useRecordingTranslator";
 import useSpeechInput from "../hooks/useSpeechInput";
 import { speechText } from "../utils/expressions";
-import { canSpeak, speak } from "../utils/feedback";
+import { canSpeak, prefetchSpeech, speak } from "../utils/feedback";
 import { newId } from "../utils/ids";
 
 // Señas -> texto: grabar primero, traducir después (useRecordingTranslator y
@@ -160,6 +160,13 @@ function Translate() {
       speak(speechText(result.items));
     }
   }, [phase, result, settings.autoSpeak]);
+
+  // El audio de la traducción se descarga apenas aparece (y de nuevo si se
+  // borra la última palabra), así "Escuchar" suena sin esperar.
+  const resultSpeech = showingResult ? speechText(items) : "";
+  useEffect(() => {
+    prefetchSpeech(resultSpeech);
+  }, [resultSpeech]);
 
   const startSigning = () => {
     if (showingResult) {

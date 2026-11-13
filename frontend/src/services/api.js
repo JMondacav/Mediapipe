@@ -289,20 +289,6 @@ export async function predictSign(landmarks) {
   return data;
 }
 
-export async function getDynamicStatus() {
-  const response = await fetch(`${API_URL}/dynamic/status/`, {
-    headers: getAuthHeaders(),
-  });
-
-  const data = await response.json().catch(() => null);
-
-  if (!response.ok) {
-    throw new Error(getApiError(data, "Error al consultar el modelo dinamico"));
-  }
-
-  return data;
-}
-
 // Los envíos grandes (grabaciones) se comprimen con gzip: los números en JSON
 // quedan ~4 veces más livianos, y en el celular subir datos es lo que más
 // demora. Si el navegador no puede comprimir, se envían igual.
@@ -373,47 +359,6 @@ export async function translateRecording(frames, aspectRatio, stream = null) {
 
   if (!response.ok) {
     throw new Error(getApiError(data, "Error al traducir la grabacion"));
-  }
-
-  return data;
-}
-
-// kind: "sign" (seña con movimiento) o "expression" (expresión facial).
-export async function saveDynamicSample(label, frames, aspectRatio, kind = "sign") {
-  const { body, headers } = await jsonRequest({
-    label,
-    kind,
-    frames,
-    aspect_ratio: aspectRatio,
-  });
-  const response = await fetch(`${API_URL}/dynamic/samples/`, {
-    method: "POST",
-    headers,
-    body,
-  });
-
-  const data = await response.json().catch(() => null);
-
-  if (!response.ok) {
-    throw new Error(getApiError(data, "Error al guardar la muestra"));
-  }
-
-  return data;
-}
-
-export async function deleteDynamicSample(label, file, kind = "sign") {
-  const response = await fetch(
-    `${API_URL}/dynamic/samples/${encodeURIComponent(label)}/${encodeURIComponent(file)}/?kind=${kind}`,
-    {
-      method: "DELETE",
-      headers: getAuthHeaders(),
-    }
-  );
-
-  const data = await response.json().catch(() => null);
-
-  if (!response.ok) {
-    throw new Error(getApiError(data, "Error al borrar la muestra"));
   }
 
   return data;

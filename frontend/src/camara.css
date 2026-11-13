@@ -293,6 +293,37 @@
   line-height: 1.1;
 }
 
+/* Resultado de la traducción como una frase corrida (SignWords) */
+.a-sentence {
+  margin: 0;
+  color: var(--c, var(--text));
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+}
+
+.result-card .a-sentence {
+  text-align: center;
+}
+
+.bubble .a-sentence {
+  color: inherit;
+  font-size: var(--fs-h3);
+  line-height: 1.35;
+}
+
+.show .a-sentence {
+  font-size: calc(44px * var(--scale));
+  text-align: center;
+}
+
+.a-sentence.a-words--history {
+  font-size: 18px;
+}
+
 /* Expresión de la cara que acompañó a una o más señas: un recuadro con la
    expresión arriba, como la marca sobre la glosa */
 .a-expr-group {

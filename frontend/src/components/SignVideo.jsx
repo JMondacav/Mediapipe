@@ -3,7 +3,8 @@ import { Picto } from "./ui";
 
 // Video de la seña de una frase (public/senas/frases/<id>.mp4), en bucle y
 // sin sonido; `rate` lo hace más lento para aprender. Mientras el video no
-// exista, se ve el aviso de contenido pendiente con el pictograma de la frase.
+// exista, se muestra el aviso de contenido pendiente con el pictograma de la
+// frase.
 function SignVideo({ id, icon = "video", rate = 1 }) {
   const videoRef = useRef(null);
   const [failed, setFailed] = useState(false);

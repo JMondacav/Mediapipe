@@ -21,8 +21,8 @@ VOICES = {
     "male": "es-CL-LorenzoNeural",
 }
 
-# Un poco más lenta de lo normal, como la voz que usaba antes la app.
-RATE = "-5%"
+# Velocidad normal: más lenta, la frase sonaba arrastrada y entrecortada.
+RATE = "+0%"
 
 MAX_TEXT_LENGTH = 500
 
