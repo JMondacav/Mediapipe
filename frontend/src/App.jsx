@@ -78,8 +78,8 @@ function App() {
         {/* Rutas de la versión anterior */}
         <Route path="/menu" element={<Navigate to="/home" replace />} />
         <Route path="/translator" element={<Navigate to="/translate" replace />} />
-        <Route path="/tutorial" element={<Navigate to="/learn?seccion=aprender" replace />} />
-        <Route path="/dynamic-recorder" element={<Navigate to="/learn?seccion=grabar" replace />} />
+        <Route path="/tutorial" element={<Navigate to="/learn" replace />} />
+        <Route path="/dynamic-recorder" element={<Navigate to="/learn" replace />} />
         <Route path="/stats" element={<Navigate to="/profile" replace />} />
 
         <Route path="*" element={<Navigate to="/" replace />} />

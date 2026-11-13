@@ -136,6 +136,56 @@ def save_sample(
     return {"label": label, "kind": kind, "file": path.name, "count": current + 1}
 
 
+def list_samples(label: str, kind: str = SIGN) -> list[dict]:
+    """Las muestras de una seña, de la más nueva a la más vieja."""
+    label_dir = data_dir(kind) / normalize_label(label)
+
+    if not label_dir.is_dir():
+        raise FileNotFoundError("Esa seña no tiene muestras")
+
+    files = [path for path in label_dir.glob("*.json") if _FILE_PATTERN.match(path.name)]
+    files.sort(key=lambda path: int(path.name.split("_")[0]), reverse=True)
+
+    return [
+        {"file": path.name, "created_ms": int(path.name.split("_")[0]), "has_face": _has_face(path)}
+        for path in files
+    ]
+
+
+def read_sample(label: str, filename: str, kind: str = SIGN) -> dict:
+    """
+    Una muestra para verla de nuevo (Aprender > Mis señas): solo el tiempo,
+    las manos y los 5 puntos de la cara de cada cuadro.
+    """
+    label = normalize_label(label)
+
+    if not _FILE_PATTERN.match(filename):
+        raise ValueError("Nombre de muestra inválido")
+
+    path = data_dir(kind) / label / filename
+
+    if not path.is_file():
+        raise FileNotFoundError("La muestra no existe")
+
+    sample = json.loads(path.read_text(encoding="utf-8"))
+    frames = [
+        {
+            "t": frame.get("t", 0),
+            "hands": frame.get("hands") or [],
+            "face": (frame.get("face") or {}).get("points"),
+        }
+        for frame in sample.get("frames") or []
+    ]
+
+    return {
+        "label": label,
+        "file": filename,
+        "created_at": sample.get("created_at"),
+        "aspect_ratio": sample.get("aspect_ratio") or 0.75,
+        "frames": frames,
+    }
+
+
 def delete_sample(label: str, filename: str, user_id: int, kind: str = SIGN) -> None:
     label = normalize_label(label)
     match = _FILE_PATTERN.match(filename)

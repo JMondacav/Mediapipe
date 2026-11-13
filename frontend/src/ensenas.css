@@ -1090,6 +1090,11 @@ textarea.input {
   overflow-wrap: anywhere;
 }
 
+/* Debajo del video de la seña, el texto va un poco más chico. */
+.show-text--sub {
+  font-size: calc(32px * var(--scale));
+}
+
 .show .a-words {
   justify-content: center;
 }

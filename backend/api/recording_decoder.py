@@ -30,6 +30,8 @@ el mismo resultado.
 
 from __future__ import annotations
 
+import unicodedata
+
 import numpy as np
 
 from api.dynamic_predictor import (
@@ -67,6 +69,10 @@ LETTER_STILL_MS = 300
 LETTER_AGREE_FRAMES = 3
 LETTER_MIN_CONFIDENCE = 0.75
 REST_LIKE_LETTERS = {"B": 0.9}
+# Letras que la app nunca escribe. La Q salía sola al señalar con el índice
+# (TU, YO) y no se usa para deletrear; el modelo de letras la sigue
+# conociendo, pero se descarta. Para volver a usarla, se saca de aquí.
+DISABLED_LETTERS = {"Q"}
 LETTER_MIN_STEPS = 2
 # Una pausa larga entre letras empieza una palabra deletreada nueva.
 LETTER_WORD_GAP_MS = 1200
@@ -95,6 +101,48 @@ SIGN_POSE_AFTER_STEPS = 3
 FINGERSPELLING_BEFORE_STEPS = 12
 FINGERSPELLING_END_MARGIN_STEPS = 3
 FINGERSPELLING_LETTERS = 2
+
+# Señas tras las cuales la persona señala algo con el cuerpo ("me duele" y
+# después dónde). Pasos de 100 ms que se ignoran después de la última posición
+# en que se detectó la seña. La ventana de 1,5 s sigue viendo la seña ~1 s
+# después de terminarla, así que 15 pasos son ~2 s de pausa reales. El nombre
+# es el de la carpeta de muestras (normalize_label).
+QUIET_AFTER_STEPS = {
+    "ME_DUELE": 15,
+    "ME_DUELE_AQUÍ": 15,
+}
+
+# Señas que no pueden venir justo después de otra: el final de la primera
+# se parece a la segunda y el modelo la agrega sin que se haya hecho (al
+# terminar QUIERO_UN_BISTEC aparecía BIEN). Seña -> (señas que se descartan,
+# pasos de 100 ms después de su última detección). Una de esas señas hecha
+# más tarde sí se escribe.
+BLOCKED_AFTER = {
+    "QUIERO_UN_BISTEC": ({"BIEN"}, 20),
+}
+
+# Señas largas que contienen a otras más cortas: CÓMO_TE_LLAMAS es una
+# secuencia y una parte se parece a TU o a YO (señalar). Si una de las cortas
+# aparece pegada a la larga (encima, hasta BEFORE pasos antes o AFTER pasos
+# después), primero se compara a cuál se pareció más: gana la que juntó más
+# evidencia (la suma de sus confianzas, o sea, más tiempo y más segura) y la
+# otra se descarta. Seña larga -> (señas cortas, BEFORE, AFTER), en pasos de
+# 100 ms.
+RIVAL_SIGNS = {
+    "CÓMO_TE_LLAMAS": ({"TU", "YO"}, 10, 20),
+    "COMO_TE_LLAMAS": ({"TU", "YO"}, 10, 20),
+}
+
+# Señas que se hacen señalando con el índice: mientras se señala, la mano
+# queda quieta con forma de Q, G o X, y esas "letras" hacían pensar que era
+# deletreo (se borraba la seña y salía "QQ") o se escribían al lado ("YO Q").
+# Si aparecen esas letras pegadas a la seña (BEFORE pasos antes, AFTER
+# después), se compara a cuál se pareció más: si la seña juntó más evidencia,
+# las letras se descartan; si no, era deletreo y se queda lo deletreado.
+SIGN_LETTER_RIVALS = {
+    "YO": ({"Q", "G", "X"}, 12, 10),
+    "TU": ({"Q", "G", "X"}, 12, 10),
+}
 
 # Expresiones faciales.
 EXPRESSION_MIN_CONFIDENCE = 0.8
@@ -186,7 +234,7 @@ def classify_steps(recording: FrameArrays, sign_model, ends, start_time: float):
         if len(labels) == 1:
             label = labels.pop()
 
-            if confidence >= REST_LIKE_LETTERS.get(label, LETTER_MIN_CONFIDENCE):
+            if label not in DISABLED_LETTERS and confidence >= REST_LIKE_LETTERS.get(label, LETTER_MIN_CONFIDENCE):
                 letters[index].update(kind="letter", label=label, confidence=confidence)
 
     for (index, _), (label, distance) in zip(
@@ -307,6 +355,78 @@ def keep_sign_segments(segments: list[dict], steps: list[dict]) -> list[dict]:
     return kept
 
 
+def _nfc(label: str) -> str:
+    # "Ó" puede venir como una letra o como "O" + tilde según quién lo escribió.
+    return unicodedata.normalize("NFC", label or "")
+
+
+_RIVALS = {_nfc(long): ({_nfc(short) for short in shorts}, before, after) for long, (shorts, before, after) in RIVAL_SIGNS.items()}
+
+
+def resolve_rivals(sign_segments: list[dict]) -> list[dict]:
+    """
+    Una seña larga (RIVAL_SIGNS) contra las cortas que se le parecen y
+    aparecen pegadas a ella: se queda la que juntó más evidencia.
+    """
+    dropped = set()
+
+    for long_index, long in enumerate(sign_segments):
+        rule = _RIVALS.get(_nfc(long["label"]))
+
+        if rule is None or long_index in dropped:
+            continue
+
+        shorts, before, after = rule
+
+        for short_index, short in enumerate(sign_segments):
+            if (
+                short_index in dropped
+                or _nfc(short["label"]) not in shorts
+                or not _overlaps(short, long["first"] - before, long["last"] + after)
+            ):
+                continue
+
+            if sum(long["confidences"]) >= sum(short["confidences"]):
+                dropped.add(short_index)
+            else:
+                dropped.add(long_index)
+                break
+
+    return [segment for index, segment in enumerate(sign_segments) if index not in dropped]
+
+
+def resolve_sign_letter_rivals(sign_segments: list[dict], letter_segments: list[dict]):
+    """
+    Seña de SIGN_LETTER_RIVALS contra las letras con su misma forma de mano
+    pegadas a ella: gana la que juntó más evidencia (suma de confianzas).
+    """
+    kept_signs = []
+    dropped_letters = set()
+
+    for sign in sign_segments:
+        rule = SIGN_LETTER_RIVALS.get(_nfc(sign["label"]))
+
+        if rule is None:
+            kept_signs.append(sign)
+            continue
+
+        shapes, before, after = rule
+        rivals = [
+            index
+            for index, letter in enumerate(letter_segments)
+            if index not in dropped_letters
+            and letter["label"] in shapes
+            and _overlaps(letter, sign["first"] - before, sign["last"] + after)
+        ]
+        letters_evidence = sum(sum(letter_segments[index]["confidences"]) for index in rivals)
+
+        if sum(sign["confidences"]) >= letters_evidence:
+            kept_signs.append(sign)
+            dropped_letters.update(rivals)
+
+    return kept_signs, [letter for index, letter in enumerate(letter_segments) if index not in dropped_letters]
+
+
 def _overlaps(segment: dict, first: int, last: int) -> bool:
     return segment["first"] <= last and first <= segment["last"]
 
@@ -332,12 +452,14 @@ def combine_signs_and_letters(signs: list[dict], letters: list[dict], shapes: li
       con que empieza o termina esa seña (no se escribe). Las demás letras se
       escriben aunque estén justo antes o después de la seña.
     """
-    sign_segments = keep_sign_segments(find_segments(signs), signs)
+    sign_segments = resolve_rivals(keep_sign_segments(find_segments(signs), signs))
     letter_segments = [
         segment
         for segment in find_segments(letters)
         if segment["last"] - segment["first"] + 1 >= LETTER_MIN_STEPS
     ]
+
+    sign_segments, letter_segments = resolve_sign_letter_rivals(sign_segments, letter_segments)
 
     sign_segments = [
         sign
@@ -369,7 +491,45 @@ def combine_signs_and_letters(signs: list[dict], letters: list[dict], shapes: li
             )
         ]
 
-    return sorted(sign_segments + letter_segments, key=lambda segment: (segment["first"], segment["last"]))
+    segments = sorted(sign_segments + letter_segments, key=lambda segment: (segment["first"], segment["last"]))
+    return apply_quiet_after(segments)
+
+
+def apply_quiet_after(segments: list[dict]) -> list[dict]:
+    """
+    Tras una seña de QUIET_AFTER_STEPS (por ejemplo "me duele") no se escribe
+    nada durante un rato: la persona señala dónde le duele y ese gesto no debe
+    leerse como otra seña ni como letra. Se cuenta desde la última posición en
+    que se detectó la seña. Las demás señas no se ven afectadas.
+    """
+    kept = []
+    quiet_until = -1
+    # Seña bloqueada (BLOCKED_AFTER) -> hasta qué posición no se escribe.
+    blocked_until = {}
+
+    for segment in segments:
+        if segment["first"] <= quiet_until:
+            continue
+
+        is_sign = segment["kind"] == "sign"
+
+        if is_sign and segment["first"] <= blocked_until.get(segment["label"], -1):
+            continue
+
+        kept.append(segment)
+
+        if not is_sign:
+            continue
+
+        quiet_steps = QUIET_AFTER_STEPS.get(segment["label"])
+        if quiet_steps:
+            quiet_until = max(quiet_until, segment["last"] + quiet_steps)
+
+        blocked, steps = BLOCKED_AFTER.get(segment["label"], ((), 0))
+        for label in blocked:
+            blocked_until[label] = max(blocked_until.get(label, -1), segment["last"] + steps)
+
+    return kept
 
 
 def build_items(tokens: list[dict]) -> list[dict]:

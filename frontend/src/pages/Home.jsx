@@ -97,7 +97,6 @@ function Home() {
   const navigate = useNavigate();
   const showMessage = useShow();
   const { user, role, setRole } = useAuth();
-  const [message, setMessage] = useState("");
   const isSigner = role !== "hearing";
 
   const show = (text, icon) => showMessage({ text, icon });
@@ -134,13 +133,7 @@ function Home() {
             icon="video"
             title="Aprender señas"
             text="Mira en video cómo se hacen las frases frecuentes"
-            onClick={() => navigate("/learn?seccion=aprender")}
-          />
-          <LearnLink
-            icon="record"
-            title="Grabar señas (equipo)"
-            text="Graba ejemplos de señas para entrenar el modelo"
-            onClick={() => navigate("/learn?seccion=grabar")}
+            onClick={() => navigate("/learn")}
           />
 
           <MyPhrases onShow={show} />
@@ -190,28 +183,12 @@ function Home() {
             onClick={() => navigate("/translate?modo=voz")}
           />
 
-          <h2 className="t-h2">Escribir un mensaje</h2>
-          <Field
-            label="Mensaje para mostrar"
-            multiline
-            value={message}
-            onChange={(event) => setMessage(event.target.value)}
-            placeholder="Escribe aquí…"
-          />
-          <Button
-            label="Mostrar en pantalla grande"
-            icon="phone"
-            size="lg"
-            disabled={!message.trim()}
-            onClick={() => show(message.trim())}
-          />
-
           <h2 className="t-h2">Aprender señas básicas</h2>
           <Button
             label="Ver cómo se hacen las señas"
             icon="video"
             variant="secondary"
-            onClick={() => navigate("/learn?seccion=aprender")}
+            onClick={() => navigate("/learn")}
           />
         </>
       )}

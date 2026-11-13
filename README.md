@@ -43,7 +43,7 @@ docker compose up --build
 
 Cuando termine de levantar:
 
-- Frontend: http://localhost:5173
+- Frontend: https://localhost:5173
 - Backend/API: http://localhost:8000/api
 - Salud API: http://localhost:8000/api/health/
 - Docs FastAPI: http://localhost:8000/docs
@@ -61,11 +61,23 @@ docker push usuario/ensenavos-frontend:latest
 
 En el TXT de entrega puedes pegar los enlaces de esas imagenes.
 
-Para probar desde un telefono en la misma red WiFi, abre la IP del computador:
+Para probar desde un telefono en la misma red WiFi, abre la IP del computador
+con **https** (con http no carga, y sin https el navegador del telefono no deja
+usar la camara ni el microfono):
 
 ```text
-http://192.168.1.5:5173
+https://192.168.1.3:5173
 ```
+
+- La IP del computador se ve con `ipconfig` (Windows), en "Dirección IPv4" del
+  adaptador WiFi.
+- El navegador avisa "La conexión no es privada" porque el certificado es
+  propio. En Chrome: *Configuración avanzada → Acceder a 192.168.1.3*. En
+  Safari: *Mostrar detalles → visitar este sitio web*.
+- El certificado (`frontend/certs/`) sirve solo para `192.168.1.3` y
+  `localhost`. Si la IP del computador cambia, hay que crear uno nuevo.
+- Si el telefono no carga nada, revisa que el firewall de Windows permita a
+  Docker en redes privadas y que el WiFi este marcado como red privada.
 
 ## Crear usuario
 
@@ -97,7 +109,7 @@ npm install
 npm run dev -- --host 0.0.0.0
 ```
 
-Luego abre http://localhost:5173.
+Luego abre https://localhost:5173.
 
 ## Que mostrar en el video
 
@@ -316,7 +328,7 @@ las expresiones de la cara cumplen contraste AA en claro y oscuro.
 `frontend-accesible/` es una copia del frontend rediseñada para personas sordas:
 señas en video, íconos, colores por función y avisos visuales, sin párrafos. Se
 entra tocando un animal y marcando un PIN de 4 números. Con
-`docker compose up --build` queda en http://localhost:5174, usando el mismo
+`docker compose up --build` queda en https://localhost:5174, usando el mismo
 backend. Detalles en `frontend-accesible/README.md`.
 
 Su traductor funciona en modo **grabar y después traducir**: la persona hace

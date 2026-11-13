@@ -13,8 +13,10 @@ backend/api/model_report_*.json
 backend/api/modelo_lsch.backup.pkl
 backend/api/modelo_dinamico.backup.npz
 backend/api/modelo_dinamico.tmp.npz
+backend/api/modelo_dinamico_respaldo*.npz
 backend/api/hand_landmarker.task
 frontend/certs/
+frontend-accesible/certs/
 
 # React
 frontend/node_modules/

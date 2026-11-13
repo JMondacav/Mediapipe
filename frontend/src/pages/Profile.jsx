@@ -126,7 +126,7 @@ function Profile() {
 
       <h2 className="t-h2">Privacidad</h2>
       <Notice icon="lock">
-        La cámara y el micrófono solo se activan en Traducir y en Grabar señas. Al servidor solo
+        La cámara y el micrófono solo se activan en Traducir. Al servidor solo
         viajan números (los puntos de las manos y de la cara), nunca la imagen. Guardamos el texto
         del resultado, no videos ni audios. Para leer en voz alta, el texto traducido se envía a un
         servicio de voz de Microsoft; el audio no se guarda ni se asocia a tu identidad.

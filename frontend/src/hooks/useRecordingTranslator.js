@@ -9,7 +9,7 @@ import {
   updateSession,
 } from "../services/api";
 import { faceRatio, toSequenceFrame } from "../utils/dynamicSigns";
-import { toHistoryText } from "../utils/expressions";
+import { greetingByPosition, toHistoryText } from "../utils/expressions";
 import { vibrate } from "../utils/feedback";
 
 // Grabar primero, traducir después:
@@ -185,7 +185,8 @@ function useRecordingTranslator() {
     try {
       const startedAt = performance.now();
       const data = await requestTranslation(frames, stream);
-      const items = itemsFrom(data);
+      // HOLA o ADIÓS según dónde quedó el saludo y si la conversación ya empezó.
+      const items = greetingByPosition(itemsFrom(data), translationsCountRef.current > 0);
       console.info(`Traducción lista en ${Math.round(performance.now() - startedAt)} ms`);
       setResult({
         items,
